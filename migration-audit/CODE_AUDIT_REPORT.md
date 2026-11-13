@@ -52,7 +52,9 @@ Commands were run from the repo root on Node v24.18.0 / npm 11.16.0.
 | 18 | `… smoke-api.mjs` against SQLite copy (4100) and MySQL (4200) | **96 requests each, 0 problems** |
 | 19 | `… smoke-api.mjs --compare sqlite.json mysql.json` | **`CONTRACT MATCH: 96 endpoints identical`** — no response shape or value changed by the engine switch |
 | 20 | `npm run build -w @swift/web` with `API_URL` on the **MySQL** backend | 14 static routes + `/products/[slug]` on demand, sitemap **19 URLs**, 0 warnings |
-| 21 | `sha256sum apps/backend/prisma/dev.db` before/after the whole rehearsal | `148cf03e…adfaec` — **unchanged**, source database never written |
+| 21 | `sha256sum apps/backend/prisma/dev.db` before/after the MySQL rehearsal (export → import → verify) | `148cf03e…adfaec` — **unchanged**; export opens SQLite `readOnly`, so the source database was never written by the migration itself |
+| 22 | Post-cleanup `smoke-api.mjs --writes` against the real `dev.db` (port 4000) | wrote **32 `AuditLog` rows**, bumped `lastLoginAt`/`updatedAt` on 1 Admin + 1 CompanyInfo + 1 Setting, and rewrote 6 `NavigationLink.position` values (the reorder handler assigns sequential positions) |
+| 23 | Restored `dev.db` from the pre-smoke export manifest, row-for-row | re-export vs the 12:39 manifest → **`NO DRIFT: all 14 tables identical`** (310 rows, 0 defects). File `sha256` is now `a20c3d78…` (SQLite reuses free pages, so bytes differ) but **logical content is bit-for-bit the verified snapshot** |
 
 > Note: Docker Desktop's `docker.exe` is installed at `%LOCALAPPDATA%\Programs\DockerDesktop\resources\bin` and is **not on PATH** in a normal shell. Its credential helper (`docker-credential-desktop.exe`) lives in the same folder, so that folder must be on PATH before `docker pull` works.
 
@@ -324,7 +326,7 @@ docker run -d --name swift-mysql-test `
 | Unique keys under MySQL collation | `Product.slug` 0 duplicates, `Review.googleReviewId` 0 duplicates |
 | API contract diff | **96 endpoints identical** (0 body/status differences) |
 | Web build against MySQL | 14 static routes + `/products/[slug]` dynamic, sitemap **19 URLs**, 0 warnings |
-| Source DB integrity | `dev.db` `sha256` unchanged (`148cf03e…adfaec`) |
+| Source DB integrity | MySQL rehearsal never wrote to `dev.db` (`sha256 148cf03e…` before and after). A later post-cleanup smoke run did write; those rows/changes were identified against the pre-smoke manifest and reverted, and the restored DB re-exports to **all 14 tables identical** (310 rows, 0 defects). File bytes changed (`a20c3d78…`) because SQLite reuses free pages — logical content is the verified snapshot. |
 
 **Preserved source-data defects** (reported, not silently fixed): `Product.category` contains `"Utility "` (trailing space) in the verbatim import; `test-tube-warmer` still carries dry-bath copy; `centrifuge` has a duplicated `Dimensions` spec; media still points at picsum/stock URLs. `--normalize-category` cleans the category only and is opt-in; the final rehearsal state used it, and `verify` re-checks the transformed state against the report.
 
@@ -367,12 +369,12 @@ docker run -d --name swift-mysql-test `
 
 ## 11. Guardrails honoured during this audit
 
-- No database writes to `dev.db`, no schema changes to the SQLite file, no seed runs. `dev.db` and both `.bak-*` files are byte-identical (`sha256` verified before and after).
-- Rehearsal writes went only to the disposable Docker MySQL database (`swift_instruments` on `127.0.0.1:3307`) and to a throwaway copy of `dev.db` (deleted afterwards).
+- The MySQL rehearsal (export → import → verify) did **not** write to `dev.db`: the exporter opens SQLite with `readOnly: true` and the file's `sha256` stayed `148cf03e…adfaec` throughout it. Only the disposable Docker MySQL database (`swift_instruments` on `127.0.0.1:3307`) and a throwaway copy of `dev.db` (deleted afterwards) were written.
+- **One exception, disclosed and reverted:** a later post-cleanup `smoke-api.mjs --writes` run hit the real `dev.db` and left 32 audit rows plus timestamp/position updates. These were identified by diffing against the pre-smoke export manifest and reverted row-for-row; a fresh export now reports **all 14 tables identical** to the verified snapshot (310 rows, 0 defects). The file's `sha256` changed to `a20c3d78…` because SQLite reuses free pages, so byte-identity no longer holds — logical identity does, and is proven by the per-table checksums. No real data was lost or invented.
 - No file in `apps/backend/uploads/` was modified.
 - No API route, response shape, database field or UI design was changed. The only behavioural code changes are: the Phase 2 build fix (`apps/web/src/lib/api.ts`), deterministic `id` tie-breakers in existing `orderBy` clauses (§6), and the Phase 3 dead-code removals (§4).
 - All SQLite-source data defects were **preserved and reported**, not silently rewritten.
-- Git history preserved; all of the above is uncommitted working-tree work on top of `e945827`.
+- Git history preserved; the work is committed in three reviewable batches on top of `e945827`.
 
 ---
 

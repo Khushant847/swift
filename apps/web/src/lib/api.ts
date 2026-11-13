@@ -13,11 +13,25 @@ import type {
   WhyItem,
 } from './types';
 
-// Server-side API origin (Node fetch needs an absolute URL).
-const API_URL = (process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').replace(
-  /\/+$/,
-  '',
-);
+/**
+ * Server-side API origin (Node fetch needs an absolute URL).
+ *
+ * Resolution order:
+ *   1. BACKEND_URL — injected at runtime by the Vercel service binding
+ *      (`web` → `backend`). Bindings do not exist during `next build`, so this
+ *      stays undefined at build time and is read again on every request.
+ *   2. API_URL — explicit origin for self-hosted / non-services deployments.
+ *   3. NEXT_PUBLIC_API_URL — legacy override.
+ *   4. Local dev backend.
+ */
+function resolveApiUrl(): string {
+  return (
+    process.env.BACKEND_URL ||
+    process.env.API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    'http://localhost:4000'
+  ).replace(/\/+$/, '');
+}
 const REVALIDATE_RAW = Number(process.env.NEXT_PUBLIC_REVALIDATE || 60);
 const REVALIDATE = Number.isFinite(REVALIDATE_RAW) && REVALIDATE_RAW >= 0 ? REVALIDATE_RAW : 60;
 // Branding/contact details change rarely but must propagate quickly after an
@@ -97,7 +111,7 @@ async function fetchApi(
   path: string,
   opts: { tags?: string[]; revalidate?: number } = {},
 ): Promise<Response> {
-  const url = `${API_URL}/api/v1${path}`;
+  const url = `${resolveApiUrl()}/api/v1${path}`;
   const revalidate = opts.revalidate ?? REVALIDATE;
   let lastError: unknown;
 

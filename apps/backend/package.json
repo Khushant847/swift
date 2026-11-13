@@ -6,10 +6,12 @@
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/prisma-generate.mjs && tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "postinstall": "node scripts/prisma-generate.mjs",
     "db:generate": "prisma generate",
+    "db:generate:prod": "node scripts/prisma-generate.mjs mysql",
     "db:generate:postgres": "prisma generate --schema prisma/schema.postgres.prisma",
     "db:push": "prisma db push",
     "db:push:postgres": "prisma db push --schema prisma/schema.postgres.prisma",
@@ -21,6 +23,7 @@
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1168.0",
     "@prisma/client": "^6.2.1",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",

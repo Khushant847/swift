@@ -55,7 +55,7 @@ API envelope: `{ success, data }` on success, `{ success:false, error, details? 
 
 | File | Location | What it contains |
 |---|---|---|
-| `env.ts` | `apps/backend/src/config/env.ts` | Zod-validated environment: `PORT`, `DATABASE_URL`, `JWT_SECRET` (+ prod hard-fail on weak secret), `JWT_EXPIRES_MINUTES`, `COOKIE_NAME`, `CORS_ORIGINS`, `STORAGE_DRIVER`, `UPLOAD_MAX_MB`, `MAIL_DRIVER`/`SMTP_*`, `TRUST_PROXY`, `GOOGLE_PLACES_*`, `CAPTCHA_SECRET`. Exports `env`, `isProd`, `corsOrigins` |
+| `env.ts` | `apps/backend/src/config/env.ts` | Zod-validated environment: `PORT`, `DATABASE_URL`, `JWT_SECRET` (+ prod hard-fail on weak secret), `JWT_EXPIRES_MINUTES`, `COOKIE_NAME`, `CORS_ORIGINS`, `STORAGE_DRIVER`, `UPLOAD_MAX_MB`, `S3_*` (bucket/region/endpoint/keys/public URL), `MAIL_DRIVER`/`SMTP_*`, `TRUST_PROXY`, `GOOGLE_PLACES_*`, `CAPTCHA_SECRET`. Exports `env`, `isProd`, `corsOrigins` |
 | `.env` | `apps/backend/.env` | Local dev secrets (DB file, JWT secret, mail=console, CORS for :3000/:5173) — **never commit** |
 | `.env.example` | `apps/backend/.env.example` | Documented template of every backend env var |
 
@@ -68,7 +68,7 @@ API envelope: `{ success, data }` on success, `{ success:false, error, details? 
 | `audit.ts` | `apps/backend/src/lib/audit.ts` | Fire-and-forget audit-trail writer (`audit()` → `AuditLog` row: actor, action, entity, details JSON, IP, user-agent); `clientIp(req)` (trust-proxy-aware, unspoofable) |
 | `prisma.ts` | `apps/backend/src/lib/prisma.ts` | Singleton `PrismaClient` (dev global-cache to survive HMR) |
 | `mailer.ts` | `apps/backend/src/lib/mailer.ts` | Nodemailer wrapper: `console` driver (dev; PII-gated logs) or `smtp` driver; `sendMail()`; `wrapEmailHtml()` branded HTML shell |
-| `storage.ts` | `apps/backend/src/lib/storage.ts` | Storage abstraction (`put`/`remove`; local driver → `apps/backend/uploads`, S3/Cloudinary drop-in interface); strict MIME/extension allow-lists (images/videos/PDF); `validateUpload`, `isVideoMime`; traversal-safe path handling |
+| `storage.ts` | `apps/backend/src/lib/storage.ts` | Storage abstraction (`put`/`remove`/`open`); local driver → `apps/backend/uploads`, S3-compatible driver (AWS/R2/Spaces/MinIO, fail-fast config) used on Vercel; streaming `/uploads` reads with Range support; strict MIME/extension allow-lists (images/videos/PDF); `validateUpload`, `isVideoMime`; traversal-safe path handling |
 | `logger.ts` | `apps/backend/src/lib/logger.ts` | Tiny dependency-free colourised structured logger (`debug`/`info`/`warn`/`error`) |
 
 ### 3.4 `src/middleware`

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "regions": ["bom1"],
+  "services": {
+    "admin": {
+      "root": "apps/admin",
+      "framework": "vite",
+      "rewrites": [
+        { "source": "/admin/assets/:path*", "destination": "/assets/:path*" },
+        { "source": "/admin", "destination": "/index.html" },
+        { "source": "/admin/:path*", "destination": "/index.html" }
+      ]
+    },
+    "backend": {
+      "root": "apps/backend",
+      "framework": "express",
+      "entrypoint": "src/server.ts",
+      "buildCommand": "node scripts/prisma-generate.mjs"
+    },
+    "web": {
+      "root": "apps/web",
+      "framework": "nextjs",
+      "bindings": [
+        {
+          "type": "service",
+          "service": "backend",
+          "format": "url",
+          "env": "BACKEND_URL"
+        }
+      ]
+    }
+  },
+  "rewrites": [
+    { "source": "/admin", "destination": { "service": "admin" } },
+    { "source": "/admin/(.*)", "destination": { "service": "admin" } },
+    { "source": "/api/(.*)", "destination": { "service": "backend" } },
+    { "source": "/uploads/(.*)", "destination": { "service": "backend" } },
+    { "source": "/(.*)", "destination": { "service": "web" } }
+  ]
+}

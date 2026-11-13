@@ -9,6 +9,9 @@ export default defineConfig(({ mode }) => {
   const target = env.VITE_PROXY_TARGET || 'http://localhost:4000';
 
   return {
+    // Vercel services mounts the SPA at /admin, so production builds must
+    // reference /admin/assets/... . Local dev keeps the root URL.
+    base: mode === 'production' ? '/admin/' : '/',
     plugins: [react()],
     // Keep in sync with the "@/*" path in tsconfig.json — without this alias a
     // "@/..." import typechecks but fails to resolve at runtime.

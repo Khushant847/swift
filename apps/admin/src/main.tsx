@@ -17,10 +17,14 @@ const queryClient = new QueryClient({
   },
 });
 
+// Vercel serves this SPA under /admin; Vite's BASE_URL keeps dev ("/") and
+// production ("/admin/") in sync with the asset paths in index.html.
+const routerBase = import.meta.env.BASE_URL === '/' ? undefined : import.meta.env.BASE_URL.replace(/\/$/, '');
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
+      <BrowserRouter basename={routerBase}>
         <ToastProvider>
           <AuthProvider>
             <App />

@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
-// Server-side backend origin for the /api proxy rewrite (SSR env wins there).
-const serverApiUrl = (process.env.API_URL || apiUrl).replace(/\/+$/, '');
+// Server-side backend origin. On Vercel services, BACKEND_URL is injected by
+// the `web` → `backend` binding at runtime; API_URL remains the override for
+// standalone deployments.
+const serverApiUrl = (process.env.BACKEND_URL || process.env.API_URL || apiUrl).replace(/\/+$/, '');
 const apiHost = (() => {
   try {
     return new URL(serverApiUrl);
@@ -18,9 +20,17 @@ const apiHost = (() => {
 const isVercel = Boolean(process.env.VERCEL);
 const vercelEnv = process.env.VERCEL_ENV || '';
 
-if (isVercel && !process.env.API_URL && !process.env.NEXT_PUBLIC_API_URL) {
+if (
+  isVercel &&
+  !process.env.BACKEND_URL &&
+  !process.env.API_URL &&
+  !process.env.NEXT_PUBLIC_API_URL
+) {
+  // Expected during `next build` in services mode: service bindings resolve in
+  // functions at runtime, not during builds. Data routes fall back to on-demand
+  // rendering, then read BACKEND_URL when a request arrives.
   console.warn(
-    '[vercel] API_URL is not set. Server-side data fetching and the /api rewrite will target http://localhost:4000 and fail. Set API_URL to the public backend URL in Vercel project settings.',
+    '[vercel] BACKEND_URL/API_URL are not set for this build. Server-side API calls will use http://localhost:4000 during the build and those routes will render on demand; BACKEND_URL is read at runtime.',
   );
 }
 if (isVercel && vercelEnv === 'production' && !process.env.NEXT_PUBLIC_SITE_URL) {

@@ -9,6 +9,8 @@ out/
 dist/
 build/
 *.tsbuildinfo
+# generated Prisma schema for the production (MySQL) client
+apps/backend/.prisma-build/
 
 # env
 .env

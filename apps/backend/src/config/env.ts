@@ -21,6 +21,17 @@ const envSchema = z.object({
 
   STORAGE_DRIVER: z.enum(['local', 's3', 'cloudinary']).default('local'),
   UPLOAD_MAX_MB: z.coerce.number().default(25),
+  // S3-compatible object storage (AWS S3, Cloudflare R2, DO Spaces, MinIO).
+  // Required on Vercel: the function filesystem is read-only/ephemeral.
+  S3_BUCKET: z.string().optional().default(''),
+  S3_REGION: z.string().optional().default(''),
+  S3_ENDPOINT: z.string().optional().default(''),
+  S3_ACCESS_KEY_ID: z.string().optional().default(''),
+  S3_SECRET_ACCESS_KEY: z.string().optional().default(''),
+  // Public bucket/CDN origin (e.g. https://cdn.example.com). Empty = serve
+  // media through this API's /uploads route (relative URLs, cacheable).
+  S3_PUBLIC_URL: z.string().optional().default(''),
+  S3_FORCE_PATH_STYLE: bool(false),
 
   MAIL_DRIVER: z.enum(['console', 'smtp']).default('console'),
   MAIL_FROM: z.string().default('Swift Instruments <no-reply@swiftinstruments.in>'),

@@ -1,11 +1,18 @@
-import { createApp } from './app';
+import type { Express } from 'express';
+import app from './app';
 import { env } from './config/env';
 import { logger } from './lib/logger';
 import { prisma } from './lib/prisma';
 
-async function bootstrap() {
-  const app = createApp();
+/**
+ * Vercel's Express framework imports `src/app.ts` (the default export) and
+ * serves it as a single Vercel Function. Bindings and database connections are
+ * resolved per request there, so the long-running listener/shutdown block below
+ * only runs for local dev and self-hosted deployments (`npm run dev` / `npm start`).
+ */
+export default app;
 
+async function startLocalServer(serverApp: Express) {
   logger.info(`Starting API (env: ${env.NODE_ENV}) — connecting to database…`);
   try {
     await prisma.$connect();
@@ -15,7 +22,7 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  const server = app.listen(env.PORT, () => {
+  const server = serverApp.listen(env.PORT, () => {
     logger.info(`🚀 Swift Instruments API running → ${env.PUBLIC_BASE_URL} (env: ${env.NODE_ENV})`);
     logger.info(`   readiness probe: ${env.PUBLIC_BASE_URL}/health/ready`);
     if (env.NODE_ENV === 'production' && env.MAIL_DRIVER === 'console') {
@@ -25,7 +32,10 @@ async function bootstrap() {
         '⚠️  MAIL_DRIVER=console in production: emails (enquiry notifications, MFA codes) are logged and DISCARDED. Set MAIL_DRIVER=smtp.',
       );
     }
-    if (env.NODE_ENV === 'production' && /^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?)/i.test(env.PUBLIC_BASE_URL)) {
+    if (
+      env.NODE_ENV === 'production' &&
+      /^https?:\/\/(localhost|127\.0\.0\.1|\[?::1\]?)/i.test(env.PUBLIC_BASE_URL)
+    ) {
       // Uploaded media URLs are stored host-relative (see lib/storage.ts), so
       // the site no longer depends on this value — but anything else that
       // prints an absolute link (emails, backups) would point at localhost.
@@ -66,4 +76,6 @@ async function bootstrap() {
   });
 }
 
-void bootstrap();
+if (!process.env.VERCEL) {
+  void startLocalServer(app);
+}

@@ -1,163 +1,229 @@
-# Deploying the Swift Instruments website on Vercel
+# Deploying Swift Instruments on Vercel (Services)
 
-This project is a **monorepo**:
+This monorepo deploys as **one Vercel project with three services**, plus MySQL
+and object storage:
 
-| App | Path | Host |
-| --- | --- | --- |
-| Public website (Next.js) | `apps/web` | **Vercel** |
-| Admin panel (Vite SPA) | `apps/admin` | Vercel / Netlify (separate project) |
-| REST API (Express + Prisma) | `apps/backend` | Railway / Render / Fly.io / VPS |
+| Service | Path in repo | Public path | Runtime |
+| --- | --- | --- | --- |
+| `web` — public website | `apps/web` | `/` (everything not matched below) | Next.js |
+| `admin` — admin console | `apps/admin` | `/admin`, `/admin/*` | Vite static SPA |
+| `backend` — REST API | `apps/backend` | `/api/*`, `/uploads/*` | Express (Node) |
 
-> Vercel can host the Next.js website, but **not** the Express API, SQLite database or local uploads folder as-is. The API must be deployed and reachable over HTTPS before the website can show live content.
+Root [`vercel.json`](../vercel.json) is the only deployment config — there is no
+per-app `vercel.json`.
+
+```jsonc
+{
+  "regions": ["bom1"],
+  "services": {
+    "admin":   { "root": "apps/admin",   "framework": "vite" },
+    "backend": { "root": "apps/backend", "framework": "express",
+                 "entrypoint": "src/server.ts",
+                 "buildCommand": "node scripts/prisma-generate.mjs" },
+    "web":     { "root": "apps/web",     "framework": "nextjs",
+                 "bindings": [{ "type": "service", "service": "backend",
+                                "format": "url", "env": "BACKEND_URL" }] }
+  },
+  "rewrites": [
+    { "source": "/admin",       "destination": { "service": "admin" } },
+    { "source": "/admin/(.*)",  "destination": { "service": "admin" } },
+    { "source": "/api/(.*)",    "destination": { "service": "backend" } },
+    { "source": "/uploads/(.*)","destination": { "service": "backend" } },
+    { "source": "/(.*)",        "destination": { "service": "web" } }
+  ]
+}
+```
+
+Why this shape:
+
+- Services are **private by default**; the top-level rewrites are what expose
+  them. A service never sees another service's routes.
+- `web` gets `BACKEND_URL` from the **binding** at runtime. Bindings do not exist
+  during `next build`, so server components read it per request
+  (`apps/web/src/lib/api.ts`). The build may log a warning — that is expected.
+- The admin SPA is built with `base: '/admin/'` and talks to the API on the
+  **same origin** (`/api/...`). That keeps the HttpOnly, `SameSite=Strict` auth
+  cookie working. Do **not** set `VITE_API_URL` in production.
+- `express.static()` is ignored on Vercel, and the function filesystem is
+  read-only/ephemeral. `/uploads/*` is served by a handler in
+  `apps/backend/src/app.ts` that streams from local disk (dev) or S3 (prod).
 
 ---
 
 ## 1. Prerequisites
 
-1. Code pushed to **GitHub / GitLab / Bitbucket** (Vercel deploys from Git).
-2. Backend deployed at a public HTTPS URL, e.g. `https://api.yourdomain.com`.
-3. PostgreSQL database for production (not SQLite).
-4. Persistent storage for uploads:
-   - a mounted volume at `apps/backend/uploads`, **or**
-   - an S3/Cloudinary driver implemented in `apps/backend/src/lib/storage.ts`.
-5. A Vercel account. Use **Pro** for a commercial website (Hobby is for personal, non-commercial projects).
+1. Repo pushed to GitHub/GitLab/Bitbucket.
+2. **MySQL 8+** database reachable from Vercel (PlanetScale, Aiven, RDS, etc.).
+   SQLite is dev-only and cannot persist on Vercel.
+3. An **S3-compatible bucket** (AWS S3, Cloudflare R2, DO Spaces, MinIO) for
+   uploads.
+4. SMTP credentials for real email/MFA delivery (otherwise `MAIL_DRIVER=console`
+   only logs messages).
+5. Vercel CLI (`npx --yes vercel@latest`) and a logged-in account.
 
 ---
 
-## 2. Deploy the backend first
+## 2. Database (MySQL 8+)
 
-The website fetches products, banners, reviews and company info from the API. Deploy the API before the first production build.
-
-### Build settings (Railway / Render)
-
-- **Root directory:** repository root
-- **Build command:**
-  ```bash
-  npm install && npm run db:generate:postgres -w @swift/backend && npm run build -w @swift/backend
-  ```
-- **Start command:**
-  ```bash
-  node apps/backend/dist/server.js
-  ```
-- **Health check:** `/health/ready`
-
-### Database
-
-Use `apps/backend/prisma/schema.postgres.prisma` for PostgreSQL. Apply it once:
+Apply the schema from a machine that can reach the database — **never** run
+migrations in the Vercel build:
 
 ```bash
-npx prisma db push --schema apps/backend/prisma/schema.postgres.prisma
+cd apps/backend
+DATABASE_URL='mysql://USER:PASS@HOST:3306/DB' \
+  npx prisma migrate deploy --schema prisma/schema.mysql.prisma
 ```
 
-Do **not** run `npm run db:seed` in production — it inserts demo reviews, placeholder images and unverified claims.
+Then seed only if this is a fresh, empty database:
 
-### Environment variables
-
-```env
-NODE_ENV=production
-PORT=4000
-PUBLIC_BASE_URL=https://api.yourdomain.com
-DATABASE_URL=postgresql://...
-JWT_SECRET=<long-random-secret>
-CORS_ORIGINS=https://yourdomain.com,https://www.yourdomain.com,https://admin.yourdomain.com
-COOKIE_DOMAIN=.yourdomain.com
-STORAGE_DRIVER=local
-UPLOAD_MAX_MB=25
+```bash
+DATABASE_URL='mysql://...' npm run db:seed
 ```
 
-If you use email, set the SMTP values. If you use a persistent disk, mount it at `apps/backend/uploads`.
+How clients are generated:
+
+- Local dev / tests → `prisma/schema.prisma` (SQLite) → `npm run db:generate`.
+- Production build → `node scripts/prisma-generate.mjs` (MySQL). Vercel runs this
+  via the backend service's `buildCommand`; locally you can force it with
+  `npm run db:generate:prod`. Both write to the default `@prisma/client`
+  location, so the app code does not branch on provider.
 
 ---
 
-## 3. Import the website into Vercel
+## 3. Object storage (uploads)
 
-1. Vercel → **Add New → Project** → import the repository.
-2. Set **Root Directory** to `apps/web`.
-3. Framework preset: **Next.js** (auto-detected).
-4. Leave Build and Install commands at their defaults — Vercel detects the npm workspace root.
-5. If the build cannot find workspace files outside `apps/web`, enable:
-   **Settings → General → Include source files outside of the Root Directory in the Build Step**.
-6. Add the environment variables below **before** the first production build.
+Create a bucket and an access key with read/write permission for that bucket.
+Media is stored under the `uploads/` prefix and served by the API's
+`/uploads/*` route with immutable cache headers.
 
-### Environment variables
+```bash
+# Preview what would be copied (no credentials needed beyond the bucket name)
+S3_BUCKET=my-bucket npm run storage:migrate
 
-| Name | Value | Notes |
+# Copy existing local files (safe: skips objects that already exist)
+S3_BUCKET=my-bucket \
+S3_REGION=ap-south-1 \
+S3_ACCESS_KEY_ID=... \
+S3_SECRET_ACCESS_KEY=... \
+  npm run storage:migrate -- --apply
+```
+
+The script only uploads — it never edits or deletes database rows or local
+files. Existing rows keep their `/uploads/...` URLs and resolve against the
+bucket automatically.
+
+Optional: set `S3_PUBLIC_URL` (e.g. `https://cdn.example.com`) so **new** uploads
+return absolute CDN URLs. Leave it empty to serve everything through `/uploads`
+(simpler, and cached at the edge).
+
+---
+
+## 4. Environment variables
+
+Set these in **Vercel → Project → Settings → Environment Variables** (Production
+and Preview). Values below are placeholders.
+
+### backend
+
+| Variable | Required | Notes |
 | --- | --- | --- |
-| `NEXT_PUBLIC_SITE_URL` | `https://yourdomain.com` | Final custom domain, no trailing slash |
-| `API_URL` | `https://api.yourdomain.com` | Public backend URL used by SSR/build |
-| `NEXT_PUBLIC_API_URL` | *(empty)* | Browser uses the same-origin `/api` proxy |
-| `NEXT_PUBLIC_REVALIDATE` | `60` | ISR window |
-| `NEXT_PUBLIC_COMPANY_REVALIDATE` | `15` | Header/footer branding refresh |
-| `API_FETCH_TIMEOUT_MS` | `5000` | Per-attempt API timeout |
+| `DATABASE_URL` | yes | `mysql://USER:PASS@HOST:3306/DB` |
+| `JWT_SECRET` | yes | ≥ 32 random chars; the API refuses to start in production without it |
+| `CORS_ORIGINS` | yes | Comma-separated public origins, e.g. `https://swiftinstruments.in,https://www.swiftinstruments.in`. The admin's mutating requests send an `Origin` header, so omitting it returns 403 |
+| `COOKIE_DOMAIN` | no | Leave **empty** (host-only cookie) |
+| `PUBLIC_BASE_URL` | yes | Public site origin (used in emails/logs) |
+| `STORAGE_DRIVER` | yes | `s3` |
+| `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | yes | `S3_REGION` may be `auto` for R2 |
+| `S3_ENDPOINT` | R2/Spaces/MinIO | Omit for AWS S3 |
+| `S3_PUBLIC_URL` | no | CDN/bucket origin; empty = proxy through `/uploads` |
+| `S3_FORCE_PATH_STYLE` | no | `true` for MinIO/most self-hosted gateways |
+| `UPLOAD_MAX_MB` | no | Default 25 |
+| `MAIL_DRIVER` | yes | `smtp` in production |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | yes with SMTP | |
+| `MAIL_FROM` | no | Sender address |
+| `TRUST_PROXY` | no | Defaults to `1` in production (Vercel proxy) |
+| `REDIS_URL` | recommended | Distributed rate limiting across function instances |
 
-`NEXT_PUBLIC_SITE_URL` is compiled into the build. If you change the domain later, **redeploy** the website.
+### web
 
-The included `apps/web/vercel.json` sets the function region to `bom1` (Mumbai). Change it if your backend or audience is elsewhere.
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `NEXT_PUBLIC_SITE_URL` | yes | Canonicals/sitemap use it; e.g. `https://swiftinstruments.in` |
+| `NEXT_PUBLIC_API_URL` | **leave empty** | Empty = same-origin `/api`; a value is inlined at build time and points browsers elsewhere |
+| `BACKEND_URL` | injected | Do not set manually — the service binding provides it |
 
----
+### admin
 
-## 4. Connect the domain bought from WordPress.com
+No variables required. `VITE_API_URL` must stay empty (same-origin `/api`).
+`VITE_PROXY_TARGET` is dev-only.
 
-You do **not** need WordPress hosting. A custom domain registered at WordPress.com can point to Vercel.
-
-1. Vercel → Project → **Settings → Domains** → add:
-   - `yourdomain.com`
-   - `www.yourdomain.com`
-2. Vercel shows the exact DNS values for **this project**. Use those values, not values from old guides.
-3. WordPress.com → **Hosting Dashboard → Domains → your domain → DNS records**:
-   - Replace the default `A @` record with Vercel's A record.
-   - Replace the `www` CNAME with Vercel's CNAME target.
-   - Keep existing **MX** and **TXT** records so email keeps working.
-   - Do **not** add an AAAA record.
-4. Wait for propagation. Vercel issues SSL automatically.
-5. In Vercel, choose your primary domain (`yourdomain.com` or `www.yourdomain.com`) and redirect the other to it.
-6. Make sure `NEXT_PUBLIC_SITE_URL` matches the primary domain exactly, then redeploy.
-
-> If WordPress.com does not allow replacing the records, or the domain is locked to a WordPress plan, transfer the domain to Cloudflare Registrar or Namecheap after the 60-day ICANN lock.
-
----
-
-## 5. Build behaviour and ISR
-
-- All public pages are cached with ISR. The product detail page is server-rendered on demand.
-- If the API is unreachable **during** the Vercel build, pages are built with empty fallbacks and marked dynamic where possible. They recover on the next revalidation, but the first crawl may see empty content.
-- **Keep the API online during the production build** for correct first-paint content and SEO.
-- Preview deployments are automatically sent `X-Robots-Tag: noindex` and `noindex` metadata so they do not compete with production.
+> `NEXT_PUBLIC_*` and `VITE_*` values are baked in at build time. Everything else
+> is read at runtime; changing it only needs a redeploy, not a rebuild.
 
 ---
 
-## 6. Verify after deployment
+## 5. Deploy
 
 ```bash
-# Home page and headers
-curl -I https://yourdomain.com
+npx --yes vercel@latest login
+npx --yes vercel@latest link          # creates .vercel/ and links the project
 
-# SEO routes must show the real domain, not localhost
-curl https://yourdomain.com/robots.txt
-curl https://yourdomain.com/sitemap.xml
+# Add env vars (repeat per variable; or use the dashboard)
+npx --yes vercel@latest env add DATABASE_URL production
 
-# Canonical + JSON-LD in the HTML
-curl -s https://yourdomain.com/ | grep -E 'canonical|application/ld\+json'
+# Preview first
+npx --yes vercel@latest
+
+# Production
+npx --yes vercel@latest --prod
 ```
 
-Then check:
-
-- `https://yourdomain.com/sitemap.xml` → all URLs start with `https://yourdomain.com`
-- `https://yourdomain.com/robots.txt` → sitemap URL is correct
-- `https://yourdomain.com/sitemap-page` → `noindex, follow`
-- A product URL → canonical, Product JSON-LD, BreadcrumbList
-- Unknown URL → real **404**
-- Enquiry form → succeeds and creates an enquiry in the admin
-- Images in the header, gallery and products → load through `/uploads` or your CDN
-- Vercel preview URL → `X-Robots-Tag: noindex, nofollow`
+Before the first production deploy, make sure the database schema is applied
+(section 2) and local media is copied (section 3).
 
 ---
 
-## 7. Known production limitations
+## 6. Post-deploy checks
 
-1. **SQLite is not suitable for Vercel/serverless.** Use PostgreSQL.
-2. **Local uploads are not persistent on Vercel.** The API must run with a persistent volume or cloud storage.
-3. **Vercel Hobby is non-commercial.** Use Pro for this business site.
-4. **Demo content still needs review.** Replace/remove seeded reviews, ISO/NABL/CE claims, `120+`, `15,000+`, founder name and picsum placeholder images before launch.
-5. **NEXT_PUBLIC_SITE_URL is build-time.** Changing it requires a redeploy.
-6. **Domain email**: do not delete MX/TXT records while changing website DNS.
+```bash
+# API readiness (DB connected) — expect {"success":true,...}
+curl -s https://YOUR-DOMAIN/api/health
+
+# Public data — expect a non-zero total
+curl -s 'https://YOUR-DOMAIN/api/v1/products?limit=1'
+
+# Uploaded media — expect 200 + image/video content type + immutable cache
+curl -sI https://YOUR-DOMAIN/uploads/banners/<file>
+
+# Admin SPA assets must be under /admin/assets/
+curl -sI https://YOUR-DOMAIN/admin/ | head
+```
+
+Then open `https://YOUR-DOMAIN/admin`, log in, upload an image, and confirm it
+renders on the public site (that exercises S3 write + `/uploads` read).
+
+---
+
+## 7. Troubleshooting
+
+| Symptom | Cause / fix |
+| --- | --- |
+| Deployment crash: `JWT_SECRET` invalid | Set a ≥ 32-char `JWT_SECRET` for the environment |
+| `/api/*` returns 500, logs mention Prisma engine/provider | `DATABASE_URL` is MySQL but the client was generated for SQLite. Confirm `node scripts/prisma-generate.mjs` ran in the backend build (it prints `provider=mysql`) |
+| Admin login returns 403 | `CORS_ORIGINS` is missing the exact origin (scheme + host) |
+| Images 404 under `/uploads/...` | Bucket credentials/bucket missing, or old files were never copied — run `npm run storage:migrate -- --apply` |
+| Admin page loads but is blank | Assets 404 — the build must use `base: '/admin/'` (set in `apps/admin/vite.config.ts`) |
+| Web pages show stale/no data | `BACKEND_URL` is injected at runtime only. Check the function logs for the resolved origin; do not hardcode `localhost` |
+| `express.static()` warnings | Expected: static serving is replaced by the `/uploads` handler |
+
+---
+
+## Notes and limits
+
+- Vercel Functions are ephemeral: any write to the local filesystem is lost.
+  MySQL + object storage are the durable stores.
+- `/uploads` responses are cached as `immutable`; because filenames are random
+  UUIDs, replacing a file means uploading a new one (the admin already does).
+- `admin` is publicly reachable at `/admin` but protected by login + MFA and
+  sends `noindex, nofollow`.
+- Logs: `vercel logs <deployment-url>` or the dashboard's Functions tab.

@@ -28,8 +28,10 @@ apps/
 
 ## Deployment
 
-The public website (`apps/web`) can be hosted on **Vercel**; the Express API,
-database and uploads need a separate host. See
+All three apps deploy as **one Vercel project using Vercel Services**: the
+Next.js site at `/`, the admin SPA at `/admin`, and the Express API at `/api` +
+`/uploads`. Services talk to each other through a private binding, and the API
+requires a MySQL 8+ database and an S3-compatible bucket. See
 [`docs/DEPLOY_VERCEL.md`](docs/DEPLOY_VERCEL.md) for the full setup, environment
 variables, domain/DNS steps and post-deploy checks.
 
@@ -132,8 +134,13 @@ Tune the windows with `API_FETCH_TIMEOUT_MS`, `NEXT_PUBLIC_REVALIDATE` and
 
 ## Production notes
 
-- Swap the Prisma datasource `provider = "sqlite"` → `"postgresql"` (see
-  `apps/backend/prisma/schema.postgres.prisma`) and point `DATABASE_URL` at your Postgres instance.
+- Production uses the MySQL schema (`apps/backend/prisma/schema.mysql.prisma`);
+  local dev keeps SQLite. `npm run build -w @swift/backend` generates the right
+  client automatically, and on Vercel `node scripts/prisma-generate.mjs` does it
+  before bundling. Apply migrations with
+  `npx prisma migrate deploy --schema prisma/schema.mysql.prisma`.
 - Set `REDIS_URL` to enable distributed rate-limit + session stores.
-- Set `STORAGE_DRIVER=s3|cloudinary` and the matching credentials to move media off local disk.
+- Set `STORAGE_DRIVER=s3` plus `S3_BUCKET`, `S3_REGION`/`S3_ENDPOINT` and
+  `S3_ACCESS_KEY_ID`/`S3_SECRET_ACCESS_KEY` to move media off local disk.
+  `npm run storage:migrate -- --apply` copies existing uploads into the bucket.
 - Set SMTP vars (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`) to enable real email + OTP delivery.

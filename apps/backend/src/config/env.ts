@@ -19,8 +19,11 @@ const envSchema = z.object({
   COOKIE_DOMAIN: z.string().optional().default(''),
   CORS_ORIGINS: z.string().default('http://localhost:3000,http://localhost:5173'),
 
-  STORAGE_DRIVER: z.enum(['local', 's3', 'cloudinary']).default('local'),
+  STORAGE_DRIVER: z.enum(['local', 's3', 'blob', 'cloudinary']).default('local'),
   UPLOAD_MAX_MB: z.coerce.number().default(25),
+  // Vercel Blob. When the store is connected to the project, Vercel injects
+  // BLOB_STORE_ID and the SDK authenticates with OIDC — no static token needed.
+  BLOB_READ_WRITE_TOKEN: z.string().optional().default(''),
   // S3-compatible object storage (AWS S3, Cloudflare R2, DO Spaces, MinIO).
   // Required on Vercel: the function filesystem is read-only/ephemeral.
   S3_BUCKET: z.string().optional().default(''),

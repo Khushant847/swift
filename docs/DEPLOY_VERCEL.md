@@ -1,7 +1,7 @@
 # Deploying Swift Instruments on Vercel (Services)
 
-This monorepo deploys as **one Vercel project with three services**, plus MySQL
-and object storage:
+This monorepo deploys as **one Vercel project with three services**, plus
+PostgreSQL and a media store (Vercel Blob or S3):
 
 | Service | Path in repo | Public path | Runtime |
 | --- | --- | --- | --- |
@@ -46,61 +46,89 @@ Why this shape:
   cookie working. Do **not** set `VITE_API_URL` in production.
 - `express.static()` is ignored on Vercel, and the function filesystem is
   read-only/ephemeral. `/uploads/*` is served by a handler in
-  `apps/backend/src/app.ts` that streams from local disk (dev) or S3 (prod).
+  `apps/backend/src/app.ts` that streams from local disk (dev), S3 or Vercel
+  Blob (prod).
 
 ---
 
 ## 1. Prerequisites
 
 1. Repo pushed to GitHub/GitLab/Bitbucket.
-2. **MySQL 8+** database reachable from Vercel (PlanetScale, Aiven, RDS, etc.).
-   SQLite is dev-only and cannot persist on Vercel.
-3. An **S3-compatible bucket** (AWS S3, Cloudflare R2, DO Spaces, MinIO) for
-   uploads.
+2. A **PostgreSQL** database reachable from Vercel. Recommended: Prisma Postgres
+   from the Vercel Marketplace (`vercel install prisma/prisma-postgres`), which
+   provisions it and sets `DATABASE_URL` on the project. MySQL 8+ and SQLite
+   schemas are kept in the repo, but SQLite is dev-only and cannot persist on
+   Vercel.
+3. A media store: **Vercel Blob** (`vercel storage create <name> --type blob
+   --access public`, then `vercel storage connect <name> --yes`) or an
+   S3-compatible bucket (AWS S3, Cloudflare R2, DO Spaces, MinIO).
 4. SMTP credentials for real email/MFA delivery (otherwise `MAIL_DRIVER=console`
    only logs messages).
 5. Vercel CLI (`npx --yes vercel@latest`) and a logged-in account.
 
 ---
 
-## 2. Database (MySQL 8+)
+## 2. Database
 
 Apply the schema from a machine that can reach the database — **never** run
-migrations in the Vercel build:
+migrations in the Vercel build.
+
+PostgreSQL (default production target):
 
 ```bash
-cd apps/backend
+DATABASE_URL='postgresql://USER:PASS@HOST:5432/DB' \
+  npm run db:migrate:deploy:postgres -w @swift/backend
+```
+
+MySQL 8+ (alternative, self-hosted):
+
+```bash
 DATABASE_URL='mysql://USER:PASS@HOST:3306/DB' \
-  npx prisma migrate deploy --schema prisma/schema.mysql.prisma
+  npm run db:migrate:deploy:mysql -w @swift/backend
 ```
 
-Then seed only if this is a fresh, empty database:
+Then seed only if this is a fresh, empty database (`DATABASE_URL=... npm run
+db:seed`). To copy the real local SQLite data instead of seeding a demo set:
 
 ```bash
-DATABASE_URL='mysql://...' npm run db:seed
+# 1. generate the Postgres client
+node apps/backend/scripts/prisma-generate.mjs postgres
+
+# 2. plan, then copy (refuses a non-empty target unless --truncate)
+DATABASE_URL='postgresql://...' npm run db:copy:sqlite-to-postgres
+DATABASE_URL='postgresql://...' npm run db:copy:sqlite-to-postgres -- --apply
 ```
+
+The copy reads `apps/backend/prisma/dev.db` with Node's built-in SQLite driver
+and writes through Prisma, so ids, enums, booleans and timestamps keep their
+types. It never modifies the SQLite source. Regenerate the SQLite client
+afterwards for local dev: `npm run db:generate`.
 
 How clients are generated:
 
 - Local dev / tests → `prisma/schema.prisma` (SQLite) → `npm run db:generate`.
-- Production build → `node scripts/prisma-generate.mjs` (MySQL). Vercel runs this
-  via the backend service's `buildCommand`; locally you can force it with
-  `npm run db:generate:prod`. Both write to the default `@prisma/client`
-  location, so the app code does not branch on provider.
+- Production build → `node scripts/prisma-generate.mjs` (PostgreSQL on Vercel).
+  Vercel runs this via the backend service's `buildCommand`; locally you can
+  force it with `npm run db:generate:prod` (Postgres) or
+  `npm run db:generate:mysql`. All targets write to the default
+  `@prisma/client` location, so the app code does not branch on provider.
 
 ---
 
 ## 3. Object storage (uploads)
 
-Create a bucket and an access key with read/write permission for that bucket.
-Media is stored under the `uploads/` prefix and served by the API's
-`/uploads/*` route with immutable cache headers.
+Media is stored under the `uploads/` prefix and served by the API's `/uploads/*`
+route with immutable cache headers and Range support. Use **Vercel Blob** (no
+static credentials — the connected store authenticates with OIDC) or any
+S3-compatible bucket.
 
 ```bash
-# Preview what would be copied (no credentials needed beyond the bucket name)
-S3_BUCKET=my-bucket npm run storage:migrate
+# Preview what would be copied, then upload to Blob
+npm run storage:migrate -- --driver blob
+npm run storage:migrate -- --driver blob --apply
 
-# Copy existing local files (safe: skips objects that already exist)
+# S3-compatible bucket
+S3_BUCKET=my-bucket npm run storage:migrate
 S3_BUCKET=my-bucket \
 S3_REGION=ap-south-1 \
 S3_ACCESS_KEY_ID=... \
@@ -110,11 +138,12 @@ S3_SECRET_ACCESS_KEY=... \
 
 The script only uploads — it never edits or deletes database rows or local
 files. Existing rows keep their `/uploads/...` URLs and resolve against the
-bucket automatically.
+store automatically.
 
-Optional: set `S3_PUBLIC_URL` (e.g. `https://cdn.example.com`) so **new** uploads
-return absolute CDN URLs. Leave it empty to serve everything through `/uploads`
-(simpler, and cached at the edge).
+Optional for S3: set `S3_PUBLIC_URL` (e.g. `https://cdn.example.com`) so **new**
+uploads return absolute CDN URLs. Leave it empty to serve everything through
+`/uploads` (simpler, and cached at the edge). Blob always returns host-relative
+URLs.
 
 ---
 
@@ -127,17 +156,18 @@ and Preview). Values below are placeholders.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | yes | `mysql://USER:PASS@HOST:3306/DB` |
+| `DATABASE_URL` | yes | `postgresql://...`, or Marketplace-provisioned (auto-set) |
 | `JWT_SECRET` | yes | ≥ 32 random chars; the API refuses to start in production without it |
 | `CORS_ORIGINS` | yes | Comma-separated public origins, e.g. `https://swiftinstruments.in,https://www.swiftinstruments.in`. The admin's mutating requests send an `Origin` header, so omitting it returns 403 |
 | `COOKIE_DOMAIN` | no | Leave **empty** (host-only cookie) |
 | `PUBLIC_BASE_URL` | yes | Public site origin (used in emails/logs) |
-| `STORAGE_DRIVER` | yes | `s3` |
-| `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | yes | `S3_REGION` may be `auto` for R2 |
+| `STORAGE_DRIVER` | yes | `blob` (Vercel Blob) or `s3` |
+| `BLOB_STORE_ID` | auto | Injected when a Blob store is connected; no static token needed |
+| `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | with `s3` | `S3_REGION` may be `auto` for R2 |
 | `S3_ENDPOINT` | R2/Spaces/MinIO | Omit for AWS S3 |
 | `S3_PUBLIC_URL` | no | CDN/bucket origin; empty = proxy through `/uploads` |
 | `S3_FORCE_PATH_STYLE` | no | `true` for MinIO/most self-hosted gateways |
-| `UPLOAD_MAX_MB` | no | Default 25 |
+| `UPLOAD_MAX_MB` | no | Default 25 (Vercel rejects bodies > 4.5 MB before the function) |
 | `MAIL_DRIVER` | yes | `smtp` in production |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` | yes with SMTP | |
 | `MAIL_FROM` | no | Sender address |
@@ -209,9 +239,9 @@ renders on the public site (that exercises S3 write + `/uploads` read).
 | Symptom | Cause / fix |
 | --- | --- |
 | Deployment crash: `JWT_SECRET` invalid | Set a ≥ 32-char `JWT_SECRET` for the environment |
-| `/api/*` returns 500, logs mention Prisma engine/provider | `DATABASE_URL` is MySQL but the client was generated for SQLite. Confirm `node scripts/prisma-generate.mjs` ran in the backend build (it prints `provider=mysql`) |
+| `/api/*` returns 500, logs mention Prisma engine/provider | `DATABASE_URL` provider and the generated client disagree. Confirm the backend build ran `node scripts/prisma-generate.mjs` and printed the expected `provider=postgresql` (or `mysql`) |
 | Admin login returns 403 | `CORS_ORIGINS` is missing the exact origin (scheme + host) |
-| Images 404 under `/uploads/...` | Bucket credentials/bucket missing, or old files were never copied — run `npm run storage:migrate -- --apply` |
+| Images 404 under `/uploads/...` | Store is empty or not connected — run `npm run storage:migrate -- --driver blob --apply` (or `--apply` for S3); check `STORAGE_DRIVER` |
 | Admin page loads but is blank | Assets 404 — the build must use `base: '/admin/'` (set in `apps/admin/vite.config.ts`) |
 | Web pages show stale/no data | `BACKEND_URL` is injected at runtime only. Check the function logs for the resolved origin; do not hardcode `localhost` |
 | `express.static()` warnings | Expected: static serving is replaced by the `/uploads` handler |
@@ -221,9 +251,13 @@ renders on the public site (that exercises S3 write + `/uploads` read).
 ## Notes and limits
 
 - Vercel Functions are ephemeral: any write to the local filesystem is lost.
-  MySQL + object storage are the durable stores.
+  PostgreSQL + Vercel Blob (or S3) are the durable stores.
 - `/uploads` responses are cached as `immutable`; because filenames are random
   UUIDs, replacing a file means uploading a new one (the admin already does).
 - `admin` is publicly reachable at `/admin` but protected by login + MFA and
   sends `noindex, nofollow`.
 - Logs: `vercel logs <deployment-url>` or the dashboard's Functions tab.
+- Request body limit on Vercel Functions is 4.5 MB. Uploads larger than that are
+  rejected with `413` by the platform before the function runs, even when
+  `UPLOAD_MAX_MB` is higher. For big files, switch the admin to presigned
+  direct-to-S3 uploads instead of proxying through `/api/v1/uploads`.

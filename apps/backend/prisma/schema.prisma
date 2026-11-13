@@ -1,6 +1,6 @@
 // Swift Instruments — Prisma schema (SQLite local dev).
-// For production PostgreSQL, use prisma/schema.postgres.prisma (same models,
-// native enums + provider = "postgresql"). Keep both in sync when editing.
+// For production PostgreSQL, use prisma/postgres/schema.prisma (same models,
+// native enums + provider = "postgresql"). Keep all schemas in sync when editing.
 
 generator client {
   provider = "prisma-client-js"

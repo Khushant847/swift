@@ -6,8 +6,9 @@
  * in the default location (`node_modules/.prisma/client`). Which schema produced
  * it depends on the environment:
  *
- *   - Local dev / tests  → prisma/schema.prisma        (SQLite)
- *   - Vercel / prod      → prisma/schema.mysql.prisma  (MySQL 8+)
+ *   - Local dev / tests  → prisma/schema.prisma                (SQLite)
+ *   - Vercel / prod      → prisma/postgres/schema.prisma       (PostgreSQL)
+ *   - MySQL (self-host)  → prisma/schema.mysql.prisma          (MySQL 8+)
  *
  * `schema.mysql.prisma` sets a custom `output` (…/client-mysql) for the local
  * migration scripts, which would leave `@prisma/client` pointing at the SQLite
@@ -16,10 +17,11 @@
  * imports it. No secrets are read or printed.
  *
  * Usage:
- *   node scripts/prisma-generate.mjs            # auto: mysql on Vercel, else sqlite
- *   node scripts/prisma-generate.mjs mysql      # force MySQL
- *   node scripts/prisma-generate.mjs sqlite     # force SQLite
- *   PRISMA_TARGET=mysql npm run build           # same, via env
+ *   node scripts/prisma-generate.mjs              # auto: postgres on Vercel, else sqlite
+ *   node scripts/prisma-generate.mjs postgres     # force PostgreSQL
+ *   node scripts/prisma-generate.mjs mysql        # force MySQL
+ *   node scripts/prisma-generate.mjs sqlite       # force SQLite
+ *   PRISMA_TARGET=postgres npm run build          # same, via env
  */
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
@@ -31,17 +33,24 @@ const backendDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const requireFromBackend = createRequire(path.join(backendDir, 'package.json'));
 
 const requested = (process.argv[2] || process.env.PRISMA_TARGET || '').trim().toLowerCase();
-const target = requested || (process.env.VERCEL ? 'mysql' : 'sqlite');
+const target = requested || (process.env.VERCEL ? 'postgres' : 'sqlite');
 
-if (target !== 'mysql' && target !== 'sqlite') {
-  console.error(`[prisma-generate] Unknown target "${target}". Use "mysql" or "sqlite".`);
+/** Prisma provider name for each supported target. */
+const PROVIDERS = { sqlite: 'sqlite', mysql: 'mysql', postgres: 'postgresql' };
+const SCHEMAS = {
+  sqlite: path.join('prisma', 'schema.prisma'),
+  mysql: path.join('prisma', 'schema.mysql.prisma'),
+  postgres: path.join('prisma', 'postgres', 'schema.prisma'),
+};
+
+if (!SCHEMAS[target]) {
+  console.error(
+    `[prisma-generate] Unknown target "${target}". Use "postgres", "mysql" or "sqlite".`,
+  );
   process.exit(1);
 }
 
-const sourceSchema =
-  target === 'mysql'
-    ? path.join(backendDir, 'prisma', 'schema.mysql.prisma')
-    : path.join(backendDir, 'prisma', 'schema.prisma');
+const sourceSchema = path.join(backendDir, SCHEMAS[target]);
 
 if (!fs.existsSync(sourceSchema)) {
   console.error(`[prisma-generate] Schema not found: ${sourceSchema}`);
@@ -112,10 +121,11 @@ try {
   if (fs.existsSync(generatedSchema)) {
     const generated = fs.readFileSync(generatedSchema, 'utf8');
     const provider = generated.match(/datasource[\s\S]*?provider\s*=\s*"([^"]+)"/)?.[1] ?? 'unknown';
+    const expected = PROVIDERS[target];
     console.log(`[prisma-generate] @prisma/client provider=${provider}`);
-    if (provider !== target) {
+    if (provider !== expected) {
       console.error(
-        `[prisma-generate] Provider mismatch: expected "${target}", generated "${provider}". ` +
+        `[prisma-generate] Provider mismatch: expected "${expected}", generated "${provider}". ` +
           `A stale client from a previous build may be winning resolution.`,
       );
       process.exit(1);

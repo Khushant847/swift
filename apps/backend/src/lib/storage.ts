@@ -8,6 +8,7 @@ import {
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3';
+import { del as blobDel, head as blobHead, put as blobPut } from '@vercel/blob';
 import { env } from '../config/env';
 import { logger } from './logger';
 
@@ -16,8 +17,9 @@ import { logger } from './logger';
  *
  * `local` writes to apps/backend/uploads and is meant for development or a host
  * with a persistent disk. `s3` writes to any S3-compatible bucket (AWS S3,
- * Cloudflare R2, DigitalOcean Spaces, MinIO) and is required on Vercel, whose
- * filesystem is read-only/ephemeral and where `express.static()` is ignored.
+ * Cloudflare R2, DigitalOcean Spaces, MinIO) and `blob` writes to a Vercel Blob
+ * store. Both remote drivers are required on Vercel, whose filesystem is
+ * read-only/ephemeral and where `express.static()` is ignored.
  *
  * Both drivers return URLs that point at this API's `/uploads/...` route, which
  * streams the file (from disk or the bucket) with immutable cache headers. Set
@@ -329,10 +331,108 @@ class S3Storage implements StorageDriver {
   }
 }
 
+/**
+ * Vercel Blob driver. Public store: files are written once with UUID names, so
+ * they are served with a one-year immutable cache. Reads go through this API's
+ * `/uploads/...` route (the DB keeps host-relative URLs), which preserves the
+ * same contract as the local and S3 drivers and supports HTTP Range requests
+ * for video seeking.
+ */
+class BlobStorage implements StorageDriver {
+  constructor() {
+    const hasOidc = Boolean(process.env.BLOB_STORE_ID);
+    if (!env.BLOB_READ_WRITE_TOKEN && !hasOidc) {
+      // Fail at boot rather than on the first upload.
+      throw new Error(
+        'STORAGE_DRIVER=blob requires a connected Vercel Blob store ' +
+          '(BLOB_STORE_ID) or BLOB_READ_WRITE_TOKEN. Connect a store to the project ' +
+          '(`vercel storage connect <store> --yes`) or use STORAGE_DRIVER=local on a host with a persistent disk.',
+      );
+    }
+  }
+
+  private keyFor(urlOrFilename: string): string {
+    const value = urlOrFilename.trim();
+    const marker = value.indexOf(URL_PREFIX);
+    if (marker >= 0) return `${KEY_PREFIX}${value.slice(marker + URL_PREFIX.length)}`;
+    if (value.startsWith(KEY_PREFIX)) return value;
+    return `${KEY_PREFIX}${value.replace(/^\/+/, '')}`;
+  }
+
+  async put(buffer: Buffer, originalName: string, mimeType: string, folder: string): Promise<StoredFile> {
+    const ext = path.extname(originalName).toLowerCase();
+    const rel = `${safeFolder(folder)}/${crypto.randomUUID()}${ext}`;
+    const key = `${KEY_PREFIX}${rel}`;
+
+    await blobPut(key, buffer, {
+      access: 'public',
+      addRandomSuffix: false,
+      contentType: mimeType,
+      // Blob names are random UUIDs, so the bytes behind a URL never change.
+      cacheControlMaxAge: 31_536_000,
+    });
+
+    // Keep the URL host-relative (like the local and S3 drivers) so switching
+    // stores never rewrites rows and every environment resolves media against
+    // whichever origin serves the site.
+    return { url: `${URL_PREFIX}${rel}`, filename: rel, size: buffer.length, mimeType };
+  }
+
+  async remove(urlOrFilename: string): Promise<void> {
+    const key = this.keyFor(urlOrFilename);
+    try {
+      const meta = await blobHead(key);
+      await blobDel(meta.url);
+    } catch (err) {
+      logger.warn('Blob delete failed (object may already be gone)', { key, err });
+    }
+  }
+
+  async open(filename: string, range?: OpenRange): Promise<OpenedFile | null> {
+    const rel = safeRelativePath(filename);
+    if (!rel) return null;
+    const key = `${KEY_PREFIX}${rel}`;
+
+    let meta: Awaited<ReturnType<typeof blobHead>>;
+    try {
+      meta = await blobHead(key);
+    } catch (err) {
+      const name = (err as { name?: string })?.name;
+      if (name === 'BlobNotFoundError') return null;
+      throw err;
+    }
+
+    // The blob CDN understands Range, so fetch it directly instead of buffering
+    // whole videos in the function.
+    const res = await fetch(meta.url, {
+      headers: range ? { Range: `bytes=${range.start}-${range.end ?? ''}` } : undefined,
+    });
+    if (res.status === 416) return null;
+    if (!res.ok && res.status !== 206) {
+      logger.warn('Blob read failed', { key, status: res.status });
+      return null;
+    }
+    if (!res.body) return null;
+
+    const contentRange = res.headers.get('content-range') ?? undefined;
+    const length = Number(res.headers.get('content-length')) || undefined;
+
+    return {
+      stream: Readable.fromWeb(res.body as import('node:stream/web').ReadableStream<Uint8Array>),
+      contentType: res.headers.get('content-type') ?? meta.contentType ?? contentTypeFor(rel),
+      size: length,
+      totalSize: contentRange ? Number(contentRange.split('/')[1]) || undefined : meta.size,
+      contentRange,
+      etag: meta.etag,
+      lastModified: meta.uploadedAt,
+    };
+  }
+}
+
 class UnconfiguredStorage implements StorageDriver {
   async put(): Promise<StoredFile> {
     throw new Error(
-      'STORAGE_DRIVER=cloudinary is not implemented yet. Use STORAGE_DRIVER=local, or s3 with an S3-compatible bucket.',
+      'STORAGE_DRIVER=cloudinary is not implemented yet. Use STORAGE_DRIVER=local, s3 with an S3-compatible bucket, or blob with a Vercel Blob store.',
     );
   }
   async remove(): Promise<void> {
@@ -346,8 +446,10 @@ class UnconfiguredStorage implements StorageDriver {
 export const storage: StorageDriver =
   env.STORAGE_DRIVER === 's3'
     ? new S3Storage()
-    : env.STORAGE_DRIVER === 'local'
-      ? new LocalStorage()
-      : new UnconfiguredStorage();
+    : env.STORAGE_DRIVER === 'blob'
+      ? new BlobStorage()
+      : env.STORAGE_DRIVER === 'local'
+        ? new LocalStorage()
+        : new UnconfiguredStorage();
 
 export const uploadRoot = UPLOAD_ROOT;

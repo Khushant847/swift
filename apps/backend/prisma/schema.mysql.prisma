@@ -1,7 +1,7 @@
 // Swift Instruments — Prisma schema for MySQL 8+ (production target).
 //
 // This is the Phase 4 schema. It is model-for-model identical to
-// schema.prisma (SQLite dev) and schema.postgres.prisma, with three classes of
+// schema.prisma (SQLite dev) and postgres/schema.prisma, with three classes of
 // deliberate differences:
 //
 //   1. Explicit MySQL column types. Prisma's default String is VARCHAR(191),

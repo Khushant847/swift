@@ -19,10 +19,12 @@
     "db:seed": "npm run db:seed -w @swift/backend",
     "db:reset": "npm run db:reset -w @swift/backend",
     "storage:migrate": "node scripts/storage/migrate-uploads.mjs",
+    "db:copy:sqlite-to-postgres": "node scripts/db/copy-sqlite-to-postgres.mjs",
     "setup": "npm install && npm run db:generate && npm run db:push && npm run db:seed"
   },
   "devDependencies": {
-    "concurrently": "^9.1.2"
+    "concurrently": "^9.1.2",
+    "pg": "^8.23.1"
   },
   "overrides": {
     "react": "19.3.0",

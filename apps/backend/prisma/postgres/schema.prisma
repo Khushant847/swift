@@ -1,8 +1,8 @@
 // Swift Instruments — Prisma schema (Production PostgreSQL).
 // Identical to schema.prisma but with native enums and the postgresql provider.
-// To use: set DATABASE_URL to a postgres connection string and set this file as
-// the active schema (e.g. `npx prisma db push --schema prisma/schema.postgres.prisma`),
-// or copy it over schema.prisma. Remember to keep both files in sync.
+// Migrations live next to this file in prisma/postgres/migrations and are applied
+// with `prisma migrate deploy --schema prisma/postgres/schema.prisma`.
+// Keep all schemas (sqlite, postgres, mysql) in sync when editing.
 
 generator client {
   provider = "prisma-client-js"

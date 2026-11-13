@@ -30,6 +30,22 @@ const COMPANY_REVALIDATE =
 /** True only during `next build` — used to suppress noisy "backend offline" logs. */
 const IS_BUILD = process.env.NEXT_PHASE === 'phase-production-build';
 
+/**
+ * Build-only failure memo, keyed by endpoint path (query string stripped).
+ *
+ * Next renders every segment (layout, page, generateMetadata) separately, so a
+ * single dead endpoint is requested a dozen times during `next build`. Once a
+ * path has failed we stop retrying it for the rest of the build: the route is
+ * already marked dynamic, and re-hitting a known-offline backend only adds
+ * seconds of timeouts and duplicate log lines.
+ *
+ * Never used at runtime — a transient outage must not poison a running server.
+ */
+const buildFailures = new Map<string, string>();
+let buildModeNoticeLogged = false;
+
+const pathKey = (path: string) => path.split('?')[0];
+
 const TIMEOUT_RAW = Number(process.env.API_FETCH_TIMEOUT_MS || 5_000);
 const FETCH_TIMEOUT = Number.isFinite(TIMEOUT_RAW) && TIMEOUT_RAW > 0 ? TIMEOUT_RAW : 5_000;
 // Builds should not stall waiting for a backend that is intentionally absent;
@@ -124,9 +140,21 @@ function onDefinitiveFailure(path: string, err: unknown, kind: 'log-only' | 'thr
   const detail = errorDetail(err);
 
   if (IS_BUILD) {
-    console.warn(
-      `[api] build-time GET ${path} unavailable (${detail}). Rendering this route on demand so an empty build-time snapshot is not cached.`,
-    );
+    // noStore() throws Next's DynamicServerError: the route opts out of static
+    // generation, so an empty build-time snapshot is never cached and served as
+    // if it were real content. The first request after the API is available
+    // renders live data.
+    const key = pathKey(path);
+    if (!buildFailures.has(key)) {
+      buildFailures.set(key, detail);
+      if (!buildModeNoticeLogged) {
+        buildModeNoticeLogged = true;
+        console.warn(
+          '[api] API unreachable during this build. Data-driven routes will render on demand (no empty HTML is cached). Start the API before building to get static pages.',
+        );
+      }
+      console.warn(`[api]   ${key} — ${detail}`);
+    }
     noStore();
     return;
   }
@@ -141,6 +169,11 @@ async function fetchJson<T>(
   tags?: string[],
   revalidate?: number,
 ): Promise<T> {
+  // Already known to be unreachable during this build — skip the retry loop.
+  if (IS_BUILD && buildFailures.has(pathKey(path))) {
+    noStore();
+    return fallback;
+  }
   try {
     const res = await fetchApi(path, { tags, revalidate });
     if (!res.ok) {
@@ -180,6 +213,10 @@ export async function getProduct(slug: string): Promise<Product | null> {
     // Malformed escape sequence — keep the original value.
   }
   const path = `/products/${encodeURIComponent(decoded)}`;
+  if (IS_BUILD && buildFailures.has(pathKey(path))) {
+    noStore();
+    return null;
+  }
   try {
     const res = await fetchApi(path, { tags: ['products'] });
     if (res.status === 404) return null;

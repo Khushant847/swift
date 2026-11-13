@@ -58,7 +58,10 @@ if (fs.existsSync(envFile)) {
 }
 
 const url = process.env.DATABASE_URL || '';
-if (!/^postgres(ql)?:\/\//.test(url)) {
+// Prisma Postgres (Vercel Marketplace) injects a `prisma+postgres://` URL; plain
+// Neon/Supabase/self-hosted targets use `postgresql://`. Both are accepted here
+// because the copy goes through Prisma Client, which understands both.
+if (!/^(prisma\+)?postgres(ql)?:\/\//.test(url)) {
   console.error(
     '[db-copy] DATABASE_URL is not a PostgreSQL URL. Generate the Postgres client and point ' +
       'DATABASE_URL at the target database (or pass --env <file>). Value is never printed.',

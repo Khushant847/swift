@@ -1,0 +1,244 @@
+// Swift Instruments — Prisma schema for MySQL 8+ (production target).
+//
+// This is the Phase 4 schema. It is model-for-model identical to
+// schema.prisma (SQLite dev) and schema.postgres.prisma, with three classes of
+// deliberate differences:
+//
+//   1. Explicit MySQL column types. Prisma's default String is VARCHAR(191),
+//      which would silently truncate real data in this database
+//      (AuditLog.details reached 2392 chars, Product.specs 1079,
+//      Product.description 882, Setting.keyValue 273). Long free-text fields
+//      use @db.Text so nothing is cut off.
+//   2. Composite indexes that match the actual query shapes
+//      (active products by date, enquiries by status+date, visible reviews,
+//      OTP lookup) instead of single-column indexes that MySQL cannot use
+//      efficiently for those queries.
+//   3. No redundant index on Admin.email (@unique already creates one).
+//
+// Enums are intentionally still Strings: the API and admin UI treat them as
+// strings, and a VARCHAR + Zod validation avoids a migration every time a new
+// value is added (AuditLog.action/entity are open-ended by design).
+//
+// Generate the MySQL client with:
+//   npx prisma generate --schema prisma/schema.mysql.prisma
+// Apply migrations with:
+//   npx prisma migrate deploy --schema prisma/schema.mysql.prisma
+
+generator client {
+  provider = "prisma-client-js"
+  // Separate output so the SQLite dev client in node_modules/.prisma/client is
+  // not overwritten. Import from this path in migration scripts only.
+  output   = "../../../node_modules/.prisma/client-mysql"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── RBAC / Auth ─────────────────────────────────────────────
+model Admin {
+  id           String   @id @default(cuid())
+  username     String   @db.VarChar(60)
+  email        String   @unique @db.VarChar(191)
+  passwordHash String   @db.VarChar(100)
+  role         String   @default("content_editor") @db.VarChar(32) // super_admin | content_editor
+  isActive     Boolean  @default(true)
+  mfaEnabled   Boolean  @default(false)
+  mfaSecret    String?  @db.VarChar(64)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  auditLogs    AuditLog[]
+
+  // No @@index([email]): @unique already creates an index, a second one only
+  // slows down every write.
+}
+
+// One-time email OTP codes for MFA login flow
+model EmailOtp {
+  id        String   @id @default(cuid())
+  adminId   String   @db.VarChar(191)
+  codeHash  String   @db.VarChar(100)
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  // Mirrors the read in auth.routes.ts: adminId + consumed + expiresAt.
+  @@index([adminId, consumed, expiresAt])
+}
+
+// ─── Header / Footer navigation ──────────────────────────────
+model NavigationLink {
+  id       String  @id @default(cuid())
+  title    String  @db.VarChar(80)
+  url      String  @db.VarChar(300)
+  position Int     @default(0)
+  location String  @default("header") @db.VarChar(16) // header | footer
+  isActive Boolean @default(true)
+
+  @@index([location, position])
+}
+
+// ─── Hero carousel ───────────────────────────────────────────
+model HeroBanner {
+  id              String   @id @default(cuid())
+  title           String?  @db.VarChar(160)
+  subtitle        String?  @db.VarChar(300)
+  ctaLabel        String?  @db.VarChar(60)
+  ctaUrl          String?  @db.VarChar(300)
+  mediaUrl        String   @db.VarChar(512)
+  mediaType       String   @default("image") @db.VarChar(16) // image | video
+  displayOrder    Int      @default(0)
+  intervalSeconds Int      @default(5000)
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+
+  @@index([displayOrder])
+}
+
+// ─── Why Choose Us (USPs) ────────────────────────────────────
+model WhyChooseUs {
+  id           String  @id @default(cuid())
+  title        String  @db.VarChar(160)
+  description  String  @db.VarChar(600)
+  icon         String  @default("BadgeCheck") @db.VarChar(60) // lucide icon name
+  displayOrder Int     @default(0)
+  isActive     Boolean @default(true)
+}
+
+// ─── Products & Services ─────────────────────────────────────
+model Product {
+  id          String   @id @default(cuid())
+  title       String   @db.VarChar(200)
+  slug        String   @unique @db.VarChar(120)
+  category    String   @db.VarChar(80)
+  shortDesc   String?  @db.VarChar(300)
+  description String   @db.Text
+  imageUrl    String?  @db.VarChar(512)
+  specs       String?  @db.Text // JSON string of key/value specs (Phase 4b: Json?)
+  isFeatured  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  // Replaces the single-column isActive/isFeatured indexes: every public query
+  // filters isActive and orders by createdAt, and featured queries filter both.
+  @@index([isActive, createdAt])
+  @@index([isFeatured, isActive])
+}
+
+// ─── Company info (About / Address / Map / Founder) ──────────
+model CompanyInfo {
+  id        String   @id @default(cuid())
+  keyName   String   @unique @db.VarChar(60) // founder_name, founder_bio, history, address, phone, fax, mobile, map_embed, email
+  keyValue  String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Upcoming products (R&D teasers) ─────────────────────────
+model UpcomingProduct {
+  id             String   @id @default(cuid())
+  title          String   @db.VarChar(200)
+  teaserDesc     String   @db.VarChar(1000)
+  expectedLaunch String   @default("Coming soon") @db.VarChar(80)
+  imageUrl       String?  @db.VarChar(512)
+  displayOrder   Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+// ─── Internal gallery ────────────────────────────────────────
+model GalleryMedia {
+  id          String   @id @default(cuid())
+  mediaUrl    String   @db.VarChar(512)
+  mediaType   String   @default("image") @db.VarChar(16) // image | video
+  categoryTag String   @default("Office") @db.VarChar(60) // Lab | Office | Team | Events
+  caption     String?  @db.VarChar(200)
+  uploadedAt  DateTime @default(now())
+
+  @@index([categoryTag])
+  @@index([uploadedAt])
+}
+
+// ─── Reviews (Google Places sync + manual) ───────────────────
+model Review {
+  id              String   @id @default(cuid())
+  authorName      String   @db.VarChar(120)
+  rating          Int      @default(5)
+  text            String   @db.VarChar(2000)
+  profilePhotoUrl String?  @db.VarChar(512)
+  source          String   @default("manual") @db.VarChar(16) // manual | google
+  googleReviewId  String?  @unique @db.VarChar(191)
+  isFeatured      Boolean  @default(false)
+  isHidden        Boolean  @default(false)
+  reviewTime      DateTime @default(now())
+
+  // Public review list: isHidden=false ORDER BY isFeatured DESC, reviewTime DESC.
+  @@index([isHidden, isFeatured, reviewTime])
+}
+
+// ─── Enquiries CRM ───────────────────────────────────────────
+model Enquiry {
+  id          String   @id @default(cuid())
+  name        String   @db.VarChar(120)
+  email       String   @db.VarChar(191)
+  phone       String   @db.VarChar(32)
+  companyName String?  @db.VarChar(160)
+  subject     String?  @db.VarChar(200)
+  message     String   @db.Text
+  status      String   @default("new") @db.VarChar(16) // new | contacted | closed
+  notes       String?  @db.Text
+  ipAddress   String?  @db.VarChar(45) // IPv6 max
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([createdAt])
+}
+
+// ─── Central Media Manager ───────────────────────────────────
+model Media {
+  id           String   @id @default(cuid())
+  url          String   @db.VarChar(512)
+  filename     String   @db.VarChar(255)
+  originalName String   @db.VarChar(255)
+  mimeType     String   @db.VarChar(100)
+  size         Int
+  folder       String   @default("general") @db.VarChar(60)
+  tags         String?  @db.VarChar(300) // comma separated
+  width        Int?
+  height       Int?
+  uploadedAt   DateTime @default(now())
+
+  @@index([folder])
+}
+
+// ─── Generic key/value settings ──────────────────────────────
+model Setting {
+  id        String   @id @default(cuid())
+  keyName   String   @unique @db.VarChar(60) // enquiry_recipients, footer_text, social_links, copyright, backup_config ...
+  keyValue  String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+// ─── Audit log ───────────────────────────────────────────────
+model AuditLog {
+  id         String   @id @default(cuid())
+  adminId    String?  @db.VarChar(191)
+  adminEmail String   @db.VarChar(191)
+  action     String   @db.VarChar(40) // create | update | delete | login | logout | config | upload | export
+  entity     String   @db.VarChar(40) // product | banner | enquiry ...
+  entityId   String?  @db.VarChar(191)
+  details    String?  @db.Text // JSON summary/diff (observed up to 2392 chars)
+  ipAddress  String?  @db.VarChar(45)
+  userAgent  String?  @db.VarChar(512)
+  createdAt  DateTime @default(now())
+
+  admin      Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([entity])
+  @@index([createdAt])
+}

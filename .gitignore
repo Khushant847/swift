@@ -26,6 +26,11 @@ apps/backend/prisma/*.db-journal
 apps/backend/prisma/*.db.bak-*
 *.bak-*
 
+# migration rehearsal artifacts (contain customer PII + password hashes)
+migration-audit/mysql-export/
+# API smoke snapshots contain real enquiry PII captured from the running API.
+migration-audit/mysql-smoke/
+
 # uploads
 apps/backend/uploads/*
 !apps/backend/uploads/.gitkeep

@@ -21,7 +21,6 @@ import {
 import { requireAuth } from '../../middleware/auth';
 import { audit } from '../../lib/audit';
 import { sendMail, wrapEmailHtml } from '../../lib/mailer';
-import { sanitizeText } from '../../lib/http';
 
 export const authRouter = Router();
 
@@ -125,7 +124,7 @@ authRouter.post(
     } else {
       const otp = await prisma.emailOtp.findFirst({
         where: { adminId: admin.id, consumed: false, expiresAt: { gt: new Date() } },
-        orderBy: { createdAt: 'desc' },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       });
       if (otp && (await bcrypt.compare(code, otp.codeHash))) {
         verified = true;
@@ -250,6 +249,3 @@ authRouter.post(
     return ok(res, { message: 'Password updated. Please sign in again.' });
   }),
 );
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _s = sanitizeText;

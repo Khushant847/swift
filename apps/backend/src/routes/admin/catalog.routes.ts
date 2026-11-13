@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
-import { asyncHandler, ok, ApiError, sanitizeHtml, sanitizeText, slugify } from '../../lib/http';
+import { asyncHandler, ok, sanitizeHtml, sanitizeText, slugify } from '../../lib/http';
 import { crudRouter } from './crudFactory';
 import {
   bannerSchema,
@@ -24,7 +24,7 @@ catalogRouter.use(
     delegate: prisma.product,
     createSchema: productSchema,
     updateSchema: productSchema.partial(),
-    orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }],
+    orderBy: [{ isFeatured: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
     listWhere: (req) => {
       const { search, category, status } = req.query as Record<string, string>;
       return {
@@ -66,7 +66,7 @@ catalogRouter.use(
     delegate: prisma.heroBanner,
     createSchema: bannerSchema,
     updateSchema: bannerSchema.partial(),
-    orderBy: { displayOrder: 'asc' },
+    orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
   }),
 );
 
@@ -92,7 +92,7 @@ catalogRouter.use(
     delegate: prisma.whyChooseUs,
     createSchema: whySchema,
     updateSchema: whySchema.partial(),
-    orderBy: { displayOrder: 'asc' },
+    orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
     transform: (data: Record<string, unknown>) => ({
       ...data,
       ...(data.title ? { title: sanitizeText(String(data.title)) } : {}),
@@ -109,7 +109,7 @@ catalogRouter.use(
     delegate: prisma.upcomingProduct,
     createSchema: upcomingSchema,
     updateSchema: upcomingSchema.partial(),
-    orderBy: { displayOrder: 'asc' },
+    orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
     transform: (data: Record<string, unknown>) => ({
       ...data,
       ...(data.title ? { title: sanitizeText(String(data.title)) } : {}),
@@ -140,7 +140,7 @@ catalogRouter.use(
     delegate: prisma.galleryMedia,
     createSchema: gallerySchema,
     updateSchema: gallerySchema.partial(),
-    orderBy: { uploadedAt: 'desc' },
+    orderBy: [{ uploadedAt: 'desc' }, { id: 'desc' }],
     listWhere: (req) => {
       const { category } = req.query as Record<string, string>;
       return category && category !== 'all' ? { categoryTag: category } : {};
@@ -155,15 +155,5 @@ catalogRouter.post(
     const { items } = req.body as { items: z.infer<typeof gallerySchema>[] };
     const created = await prisma.galleryMedia.createMany({ data: items });
     return ok(res, { created: created.count }, 201);
-  }),
-);
-
-catalogRouter.delete(
-  '/gallery/:id',
-  asyncHandler(async (req, res) => {
-    const media = await prisma.galleryMedia.findUnique({ where: { id: req.params.id } });
-    if (!media) throw ApiError.notFound('Gallery item not found');
-    await prisma.galleryMedia.delete({ where: { id: req.params.id } });
-    return ok(res, { deleted: true });
   }),
 );

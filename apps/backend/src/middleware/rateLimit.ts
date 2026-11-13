@@ -1,6 +1,5 @@
 import rateLimit from 'express-rate-limit';
 import type { Request } from 'express';
-import { env } from '../config/env';
 
 /**
  * Sliding-window style limiters. Uses the in-memory store by default; set
@@ -61,6 +60,3 @@ export const uploadLimiter = makeLimiter({
   message: 'Too many uploads. Please wait a moment and try again.',
   keyPrefix: 'upl',
 });
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-const _redisConfigured = env.REDIS_URL;

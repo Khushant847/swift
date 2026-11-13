@@ -53,7 +53,7 @@ crmRouter.get(
   asyncHandler(async (req, res) => {
     const rows = await prisma.enquiry.findMany({
       where: whereFromQuery(req.query as Record<string, string>),
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     });
 
     const header = ['ID', 'Name', 'Email', 'Phone', 'Company', 'Subject', 'Message', 'Status', 'Created At'];
@@ -117,7 +117,7 @@ crmRouter.get(
     const skip = (page - 1) * take;
     const where = whereFromQuery(q);
     const [items, total] = await Promise.all([
-      prisma.enquiry.findMany({ where, orderBy: { createdAt: 'desc' }, take, skip }),
+      prisma.enquiry.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take, skip }),
       prisma.enquiry.count({ where }),
     ]);
     return ok(res, { items, total, page, pageSize: take });

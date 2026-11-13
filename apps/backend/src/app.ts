@@ -3,7 +3,6 @@ import helmet from 'helmet';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
-import path from 'node:path';
 import { corsOrigins, env, isProd } from './config/env';
 import { ApiError } from './lib/http';
 import { apiLimiter } from './middleware/rateLimit';
@@ -135,4 +134,3 @@ export function createApp() {
 }
 
 export const uploadsDir = uploadRoot;
-export { path };

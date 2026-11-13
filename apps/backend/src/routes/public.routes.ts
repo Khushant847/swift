@@ -17,7 +17,10 @@ publicRouter.get(
   asyncHandler(async (_req, res) => {
     const links = await prisma.navigationLink.findMany({
       where: { isActive: true },
-      orderBy: { position: 'asc' },
+      // `id` as a tie-breaker: SQLite returned insertion order for equal
+      // positions, MySQL returns primary-key order. Ordering must not depend
+      // on the storage engine (header and footer both start at position 0).
+      orderBy: [{ position: 'asc' }, { id: 'asc' }],
     });
     return ok(res, links);
   }),
@@ -29,7 +32,7 @@ publicRouter.get(
   asyncHandler(async (_req, res) => {
     const banners = await prisma.heroBanner.findMany({
       where: { isActive: true },
-      orderBy: { displayOrder: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
     });
     return ok(res, banners);
   }),
@@ -41,7 +44,7 @@ publicRouter.get(
   asyncHandler(async (_req, res) => {
     const items = await prisma.whyChooseUs.findMany({
       where: { isActive: true },
-      orderBy: { displayOrder: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
     });
     return ok(res, items);
   }),
@@ -85,7 +88,7 @@ publicRouter.get(
         : {}),
     };
     const [items, total] = await Promise.all([
-      prisma.product.findMany({ where, orderBy: { createdAt: 'desc' }, take, skip }),
+      prisma.product.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take, skip }),
       prisma.product.count({ where }),
     ]);
     return ok(res, { items, total, page: pageNum, pageSize: take });
@@ -140,7 +143,7 @@ publicRouter.get(
   asyncHandler(async (_req, res) => {
     const items = await prisma.upcomingProduct.findMany({
       where: { isActive: true },
-      orderBy: { displayOrder: 'asc' },
+      orderBy: [{ displayOrder: 'asc' }, { id: 'asc' }],
     });
     return ok(res, items);
   }),
@@ -153,7 +156,7 @@ publicRouter.get(
     const { category } = req.query as Record<string, string>;
     const items = await prisma.galleryMedia.findMany({
       where: category && category !== 'all' ? { categoryTag: category } : {},
-      orderBy: { uploadedAt: 'desc' },
+      orderBy: [{ uploadedAt: 'desc' }, { id: 'desc' }],
     });
     return ok(res, items);
   }),
@@ -177,7 +180,9 @@ publicRouter.get(
   asyncHandler(async (_req, res) => {
     const items = await prisma.review.findMany({
       where: { isHidden: false },
-      orderBy: [{ isFeatured: 'desc' }, { reviewTime: 'desc' }],
+      // Seeded reviews share the exact same reviewTime, so a secondary key is
+      // required for a stable order after the MySQL migration.
+      orderBy: [{ isFeatured: 'desc' }, { reviewTime: 'desc' }, { id: 'asc' }],
     });
     const avg = items.length ? items.reduce((s, r) => s + r.rating, 0) / items.length : 0;
     return ok(res, { items, average: Number(avg.toFixed(2)), count: items.length });

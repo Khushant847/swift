@@ -2,7 +2,6 @@
 import { Router } from 'express';
 import type { Request } from 'express';
 import { z } from 'zod';
-import { prisma } from '../../lib/prisma';
 import { asyncHandler, ok, ApiError } from '../../lib/http';
 import { validate } from '../../middleware/validate';
 import { audit } from '../../lib/audit';
@@ -112,4 +111,3 @@ export function crudRouter(opts: CrudOptions): Router {
   return router;
 }
 
-export const prismaDelegates = prisma;

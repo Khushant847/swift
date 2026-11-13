@@ -34,14 +34,6 @@ export function parseSocialLinks(raw?: string): { label: string; url: string; ic
   }
 }
 
-export function isValidPhone(phone: string): boolean {
-  return /^[+]?[\d\s\-()]{7,20}$/.test(phone.trim());
-}
-
-export function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-}
-
 /**
  * Normalise a stored media URL for rendering on the public site.
  *

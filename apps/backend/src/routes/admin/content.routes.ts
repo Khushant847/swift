@@ -68,7 +68,7 @@ contentRouter.use(
     delegate: prisma.navigationLink,
     createSchema: navSchema,
     updateSchema: navSchema.partial(),
-    orderBy: [{ location: 'asc' }, { position: 'asc' }],
+    orderBy: [{ location: 'asc' }, { position: 'asc' }, { id: 'asc' }],
     listWhere: (req) => {
       const { location } = req.query as Record<string, string>;
       return location ? { location } : {};
@@ -161,7 +161,7 @@ contentRouter.use(
     delegate: prisma.review,
     createSchema: reviewSchema,
     updateSchema: reviewSchema.partial(),
-    orderBy: [{ isFeatured: 'desc' }, { reviewTime: 'desc' }],
+    orderBy: [{ isFeatured: 'desc' }, { reviewTime: 'desc' }, { id: 'asc' }],
     transform: (data: Record<string, unknown>) => ({
       ...data,
       ...(data.text ? { text: sanitizeText(String(data.text)) } : {}),

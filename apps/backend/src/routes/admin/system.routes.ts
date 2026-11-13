@@ -47,11 +47,11 @@ systemRouter.get(
     ]);
 
     const recentEnquiries = await prisma.enquiry.findMany({
-      orderBy: { createdAt: 'desc' },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: 6,
     });
 
-    const recentAudit = await prisma.auditLog.findMany({ orderBy: { createdAt: 'desc' }, take: 6 });
+    const recentAudit = await prisma.auditLog.findMany({ orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take: 6 });
 
     // last 7 days enquiry trend
     const since = new Date();
@@ -114,7 +114,7 @@ systemRouter.get(
         : {}),
     };
     const [items, total] = await Promise.all([
-      prisma.auditLog.findMany({ where, orderBy: { createdAt: 'desc' }, take, skip }),
+      prisma.auditLog.findMany({ where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], take, skip }),
       prisma.auditLog.count({ where }),
     ]);
     return ok(res, { items, total, page, pageSize: take });
@@ -128,7 +128,7 @@ systemRouter.get(
   asyncHandler(async (_req, res) => {
     const users = await prisma.admin.findMany({
       select: { id: true, username: true, email: true, role: true, isActive: true, mfaEnabled: true, lastLoginAt: true, createdAt: true },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     });
     return ok(res, users);
   }),
@@ -217,7 +217,7 @@ systemRouter.get(
         ...(q.folder && q.folder !== 'all' ? { folder: q.folder } : {}),
         ...(q.search ? { OR: [{ originalName: { contains: q.search } }, { tags: { contains: q.search } }] } : {}),
       },
-      orderBy: { uploadedAt: 'desc' },
+      orderBy: [{ uploadedAt: 'desc' }, { id: 'desc' }],
     });
     return ok(res, items);
   }),

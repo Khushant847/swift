@@ -397,8 +397,12 @@ class BlobStorage implements StorageDriver {
     try {
       meta = await blobHead(key);
     } catch (err) {
-      const name = (err as { name?: string })?.name;
-      if (name === 'BlobNotFoundError') return null;
+      // @vercel/blob may throw a plain Error for a missing blob instead of the
+      // exported BlobNotFoundError class, so match both.
+      const e = err as { name?: string; message?: string } | null;
+      if (e?.name === 'BlobNotFoundError' || /does not exist|not found/i.test(e?.message ?? '')) {
+        return null;
+      }
       throw err;
     }
 

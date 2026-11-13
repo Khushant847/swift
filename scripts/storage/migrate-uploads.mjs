@@ -162,7 +162,11 @@ if (driver === 'blob') {
       await head(key);
       return true;
     } catch (err) {
-      if (err?.name === 'BlobNotFoundError') return false;
+      // The SDK can throw a plain Error for a missing blob in some versions.
+      const e = err;
+      if (e?.name === 'BlobNotFoundError' || /does not exist|not found/i.test(e?.message ?? '')) {
+        return false;
+      }
       throw err;
     }
   };

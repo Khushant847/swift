@@ -1,0 +1,224 @@
+// Swift Instruments — Prisma schema (Production PostgreSQL).
+// Identical to schema.prisma but with native enums and the postgresql provider.
+// To use: set DATABASE_URL to a postgres connection string and set this file as
+// the active schema (e.g. `npx prisma db push --schema prisma/schema.postgres.prisma`),
+// or copy it over schema.prisma. Remember to keep both files in sync.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AdminRole {
+  super_admin
+  content_editor
+}
+
+enum MediaType {
+  image
+  video
+}
+
+enum NavLocation {
+  header
+  footer
+}
+
+enum EnquiryStatus {
+  new
+  contacted
+  closed
+}
+
+enum ReviewSource {
+  manual
+  google
+}
+
+model Admin {
+  id           String    @id @default(cuid())
+  username     String
+  email        String    @unique
+  passwordHash String
+  role         AdminRole @default(content_editor)
+  isActive     Boolean   @default(true)
+  mfaEnabled   Boolean   @default(false)
+  mfaSecret    String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  auditLogs    AuditLog[]
+
+  @@index([email])
+}
+
+model EmailOtp {
+  id        String   @id @default(cuid())
+  adminId   String
+  codeHash  String
+  expiresAt DateTime
+  consumed  Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([adminId])
+}
+
+model NavigationLink {
+  id       String      @id @default(cuid())
+  title    String
+  url      String
+  position Int         @default(0)
+  location NavLocation @default(header)
+  isActive Boolean     @default(true)
+
+  @@index([location, position])
+}
+
+model HeroBanner {
+  id              String    @id @default(cuid())
+  title           String?
+  subtitle        String?
+  ctaLabel        String?
+  ctaUrl          String?
+  mediaUrl        String
+  mediaType       MediaType @default(image)
+  displayOrder    Int       @default(0)
+  intervalSeconds Int       @default(5000)
+  isActive        Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+
+  @@index([displayOrder])
+}
+
+model WhyChooseUs {
+  id           String  @id @default(cuid())
+  title        String
+  description  String
+  icon         String  @default("BadgeCheck")
+  displayOrder Int     @default(0)
+  isActive     Boolean @default(true)
+}
+
+model Product {
+  id          String   @id @default(cuid())
+  title       String
+  slug        String   @unique
+  category    String
+  shortDesc   String?
+  description String
+  imageUrl    String?
+  specs       String?
+  isFeatured  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+  @@index([isFeatured])
+  @@index([isActive])
+}
+
+model CompanyInfo {
+  id        String   @id @default(cuid())
+  keyName   String   @unique
+  keyValue  String
+  updatedAt DateTime @updatedAt
+}
+
+model UpcomingProduct {
+  id             String   @id @default(cuid())
+  title          String
+  teaserDesc     String
+  expectedLaunch String   @default("Coming soon")
+  imageUrl       String?
+  displayOrder   Int      @default(0)
+  isActive       Boolean  @default(true)
+  createdAt      DateTime @default(now())
+}
+
+model GalleryMedia {
+  id          String    @id @default(cuid())
+  mediaUrl    String
+  mediaType   MediaType @default(image)
+  categoryTag String    @default("Office")
+  caption     String?
+  uploadedAt  DateTime  @default(now())
+
+  @@index([categoryTag])
+}
+
+model Review {
+  id              String       @id @default(cuid())
+  authorName      String
+  rating          Int          @default(5)
+  text            String
+  profilePhotoUrl String?
+  source          ReviewSource @default(manual)
+  googleReviewId  String?      @unique
+  isFeatured      Boolean      @default(false)
+  isHidden        Boolean      @default(false)
+  reviewTime      DateTime     @default(now())
+}
+
+model Enquiry {
+  id          String        @id @default(cuid())
+  name        String
+  email       String
+  phone       String
+  companyName String?
+  subject     String?
+  message     String
+  status      EnquiryStatus @default(new)
+  notes       String?
+  ipAddress   String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Media {
+  id           String   @id @default(cuid())
+  url          String
+  filename     String
+  originalName String
+  mimeType     String
+  size         Int
+  folder       String   @default("general")
+  tags         String?
+  width        Int?
+  height       Int?
+  uploadedAt   DateTime @default(now())
+
+  @@index([folder])
+}
+
+model Setting {
+  id        String   @id @default(cuid())
+  keyName   String   @unique
+  keyValue  String
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  adminId    String?
+  adminEmail String
+  action     String
+  entity     String
+  entityId   String?
+  details    String?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  admin      Admin?   @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([entity])
+  @@index([createdAt])
+}

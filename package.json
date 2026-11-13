@@ -1,0 +1,33 @@
+{
+  "name": "swift-instruments",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Swift Instruments corporate website + enterprise admin panel (monorepo)",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n api,web,admin -c blue,green,magenta \"npm run dev -w @swift/backend\" \"node scripts/wait-for-api.mjs && npm run dev -w @swift/web\" \"node scripts/wait-for-api.mjs && npm run dev -w @swift/admin\"",
+    "dev:api": "npm run dev -w @swift/backend",
+    "dev:web": "npm run dev -w @swift/web",
+    "dev:admin": "npm run dev -w @swift/admin",
+    "build": "npm run build -w @swift/backend && npm run build -w @swift/web && npm run build -w @swift/admin",
+    "typecheck": "npm run typecheck -w @swift/backend && npm run typecheck -w @swift/web && npm run typecheck -w @swift/admin",
+    "lint": "npm run lint -w @swift/web && npm run lint -w @swift/admin",
+    "db:generate": "npm run db:generate -w @swift/backend",
+    "db:push": "npm run db:push -w @swift/backend",
+    "db:seed": "npm run db:seed -w @swift/backend",
+    "db:reset": "npm run db:reset -w @swift/backend",
+    "setup": "npm install && npm run db:generate && npm run db:push && npm run db:seed"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "overrides": {
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

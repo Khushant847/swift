@@ -76,7 +76,35 @@ migrations in the Vercel build.
 PostgreSQL (default production target):
 
 ```bash
-DATABASE_URL='postgresql://USER:PASS@HOST:5432/DB' \
+# Migrations use the DIRECT connection, not the pooled one (see below).
+# Prisma reads env("DATABASE_URL"), so pass the direct URL to this command.
+DATABASE_URL='postgresql://USER:PASS@db.prisma.io:5432/DB' \
+  npm run db:migrate:deploy:postgres -w @swift/backend
+```
+
+#### Pooled vs direct connections (Prisma Postgres)
+
+Prisma Postgres gives you two URLs and they are **not** interchangeable:
+
+| Use | Variable | Host | Notes |
+| --- | --- | --- | --- |
+| Runtime (the deployed API) | `DATABASE_URL` | `pooled.db.prisma.io` | Append `?connection_limit=3&pool_timeout=15`. Serverless functions open many short-lived clients; the direct endpoint exhausts the role's connection quota (`FATAL: too many connections for role ...`) |
+| Migrations / data copy / scripts | `POSTGRES_URL` | `db.prisma.io` | Direct connection. Migrations need it; do **not** point the runtime at it |
+
+`vercel integration add prisma/prisma-postgres` sets `DATABASE_URL` to the
+**direct** URL. After provisioning, replace the production/preview
+`DATABASE_URL` with the pooled URL plus the two parameters above, and keep the
+direct URL in `POSTGRES_URL` for convenience:
+
+```bash
+# Runtime value (Production + Preview)
+vercel env add DATABASE_URL production --force --type config \
+  --value 'postgresql://...@pooled.db.prisma.io:5432/postgres?sslmode=require&connection_limit=3&pool_timeout=15'
+vercel env add DATABASE_URL preview --force --type config --value '...same...'
+
+# Migrations: Prisma only reads DATABASE_URL, so export the DIRECT URL for the
+# command. It never needs to be set on Vercel.
+DATABASE_URL='postgresql://...@db.prisma.io:5432/postgres?sslmode=require' \
   npm run db:migrate:deploy:postgres -w @swift/backend
 ```
 
@@ -156,7 +184,7 @@ and Preview). Values below are placeholders.
 
 | Variable | Required | Notes |
 | --- | --- | --- |
-| `DATABASE_URL` | yes | `postgresql://...`, or Marketplace-provisioned (auto-set) |
+| `DATABASE_URL` | yes | Runtime value: use the **pooled** URL (`pooled.db.prisma.io`) with `connection_limit=3&pool_timeout=15`. The direct URL exhausts connections under serverless load — see section 2 |
 | `JWT_SECRET` | yes | ≥ 32 random chars; the API refuses to start in production without it |
 | `CORS_ORIGINS` | yes | Comma-separated public origins, e.g. `https://swiftinstruments.in,https://www.swiftinstruments.in`. The admin's mutating requests send an `Origin` header, so omitting it returns 403 |
 | `COOKIE_DOMAIN` | no | Leave **empty** (host-only cookie) |
@@ -239,6 +267,8 @@ renders on the public site (that exercises S3 write + `/uploads` read).
 | Symptom | Cause / fix |
 | --- | --- |
 | Deployment crash: `JWT_SECRET` invalid | Set a ≥ 32-char `JWT_SECRET` for the environment |
+| `/api/*` returns 500, logs mention `Too many database connections opened` | Runtime `DATABASE_URL` points at the direct endpoint. Switch it to `pooled.db.prisma.io` and append `?connection_limit=3&pool_timeout=15` |
+| `/api/health` says `db: down` but product pages work | Readiness probe waited out `pool_timeout` (15 s) on a cold start. Confirm the pooled URL is set; the probe reports 503 while a connection is unavailable |
 | `/api/*` returns 500, logs mention Prisma engine/provider | `DATABASE_URL` provider and the generated client disagree. Confirm the backend build ran `node scripts/prisma-generate.mjs` and printed the expected `provider=postgresql` (or `mysql`) |
 | Admin login returns 403 | `CORS_ORIGINS` is missing the exact origin (scheme + host) |
 | Images 404 under `/uploads/...` | Store is empty or not connected — run `npm run storage:migrate -- --driver blob --apply` (or `--apply` for S3); check `STORAGE_DRIVER` |

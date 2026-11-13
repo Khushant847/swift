@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { asyncHandler, ok, ApiError, sanitizeText } from '../../lib/http';
 import { validate } from '../../middleware/validate';
@@ -7,10 +8,24 @@ import { audit } from '../../lib/audit';
 
 export const crmRouter = Router();
 
-function whereFromQuery(q: Record<string, string>) {
+// The SQLite schema stores Enquiry.status as a plain string while the
+// PostgreSQL/MySQL schemas use a native enum. Narrowing to the literal union
+// satisfies both generated clients and rejects unknown values before they reach
+// the database.
+const ENQUIRY_STATUSES = ['new', 'contacted', 'closed'] as const;
+type EnquiryStatusValue = (typeof ENQUIRY_STATUSES)[number];
+
+function parseEnquiryStatus(value: unknown): EnquiryStatusValue | undefined {
+  return ENQUIRY_STATUSES.includes(value as EnquiryStatusValue)
+    ? (value as EnquiryStatusValue)
+    : undefined;
+}
+
+function whereFromQuery(q: Record<string, string>): Prisma.EnquiryWhereInput {
   const { search, status, from, to } = q;
+  const statusFilter = parseEnquiryStatus(status);
   return {
-    ...(status && status !== 'all' ? { status } : {}),
+    ...(statusFilter ? { status: statusFilter } : {}),
     ...(from || to
       ? {
           createdAt: {
@@ -137,8 +152,14 @@ crmRouter.patch(
   '/enquiries/:id',
   validate(enquiryUpdateSchema),
   asyncHandler(async (req, res) => {
-    const data = { ...req.body } as { status?: string; notes?: string | null };
-    if (typeof data.notes === 'string') data.notes = sanitizeText(data.notes);
+    const data: Prisma.EnquiryUpdateInput = {};
+    if (req.body.status !== undefined) {
+      const status = parseEnquiryStatus(req.body.status);
+      if (!status) throw ApiError.badRequest('Invalid status');
+      data.status = status;
+    }
+    if (typeof req.body.notes === 'string') data.notes = sanitizeText(req.body.notes);
+    else if (req.body.notes === null) data.notes = null;
     const updated = await prisma.enquiry.update({ where: { id: req.params.id }, data });
     await audit({ adminId: req.admin?.sub, adminEmail: req.admin?.email ?? 'system', action: 'update', entity: 'enquiry', entityId: req.params.id, details: data, req });
     return ok(res, updated);

@@ -8,6 +8,7 @@
       "rewrites": [
         { "source": "/admin/assets/:path*", "destination": "/assets/:path*" },
         { "source": "/admin", "destination": "/index.html" },
+        { "source": "/admin/", "destination": "/index.html" },
         { "source": "/admin/:path*", "destination": "/index.html" }
       ]
     },
@@ -32,6 +33,7 @@
   },
   "rewrites": [
     { "source": "/admin", "destination": { "service": "admin" } },
+    { "source": "/admin/", "destination": { "service": "admin" } },
     { "source": "/admin/(.*)", "destination": { "service": "admin" } },
     { "source": "/api/(.*)", "destination": { "service": "backend" } },
     { "source": "/uploads/(.*)", "destination": { "service": "backend" } },

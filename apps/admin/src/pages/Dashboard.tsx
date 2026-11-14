@@ -41,14 +41,14 @@ export function DashboardPage() {
       <PageHeader title="Dashboard" description="Real-time overview of your website content and enquiries." />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Enquiries" value={data?.stats.totalEnquiries ?? 0} icon={<Inbox className="h-6 w-6" />} accent="brand" hint={`${data?.stats.newEnquiries ?? 0} new`} />
-        <StatCard label="Active Products" value={data?.stats.activeProducts ?? 0} icon={<Package className="h-6 w-6" />} accent="green" hint={`${data?.stats.featuredProducts ?? 0} featured`} />
-        <StatCard label="Media Assets" value={data?.stats.mediaCount ?? 0} icon={<FolderOpen className="h-6 w-6" />} accent="purple" />
-        <StatCard label="Reviews" value={data?.stats.reviewCount ?? 0} icon={<Star className="h-6 w-6" />} accent="accent" />
-        <StatCard label="Hero Banners" value={data?.stats.bannerCount ?? 0} icon={<Images className="h-6 w-6" />} accent="brand" />
-        <StatCard label="Upcoming" value={data?.stats.upcomingCount ?? 0} icon={<Rocket className="h-6 w-6" />} accent="accent" />
-        <StatCard label="Gallery Items" value={data?.stats.galleryCount ?? 0} icon={<GalleryHorizontalEnd className="h-6 w-6" />} accent="purple" />
-        <StatCard label="Nav Links" value={data?.stats.navigationCount ?? 0} icon={<Navigation className="h-6 w-6" />} accent="green" />
+        <StatCard label="Total Enquiries" value={data?.stats.totalEnquiries ?? '—'} icon={<Inbox className="h-6 w-6" />} accent="brand" hint={data ? `${data.stats.newEnquiries} new` : undefined} />
+        <StatCard label="Active Products" value={data?.stats.activeProducts ?? '—'} icon={<Package className="h-6 w-6" />} accent="green" hint={data ? `${data.stats.featuredProducts} featured` : undefined} />
+        <StatCard label="Media Assets" value={data?.stats.mediaCount ?? '—'} icon={<FolderOpen className="h-6 w-6" />} accent="purple" />
+        <StatCard label="Reviews" value={data?.stats.reviewCount ?? '—'} icon={<Star className="h-6 w-6" />} accent="accent" />
+        <StatCard label="Hero Banners" value={data?.stats.bannerCount ?? '—'} icon={<Images className="h-6 w-6" />} accent="brand" />
+        <StatCard label="Upcoming" value={data?.stats.upcomingCount ?? '—'} icon={<Rocket className="h-6 w-6" />} accent="accent" />
+        <StatCard label="Gallery Items" value={data?.stats.galleryCount ?? '—'} icon={<GalleryHorizontalEnd className="h-6 w-6" />} accent="purple" />
+        <StatCard label="Nav Links" value={data?.stats.navigationCount ?? '—'} icon={<Navigation className="h-6 w-6" />} accent="green" />
       </div>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-3">

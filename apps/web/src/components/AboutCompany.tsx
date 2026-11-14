@@ -36,6 +36,11 @@ export function AboutCompany({ company }: { company: CompanyInfo }) {
                   fill
                   sizes="(max-width: 1024px) 90vw, 400px"
                   className="object-cover object-center"
+                  // Uploaded media is already served in its final format by the
+                  // backend (Blob/local with immutable caching). The Next image
+                  // optimizer isn't routed in Vercel services mode, so optimising
+                  // here would 404 and leave the founder photo blank.
+                  unoptimized
                 />
               ) : (
                 <div className="flex h-full items-center justify-center text-slate-300">Founder</div>

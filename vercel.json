@@ -7,6 +7,8 @@
       "framework": "vite",
       "rewrites": [
         { "source": "/admin/assets/:path*", "destination": "/assets/:path*" },
+        { "source": "/admin/favicon.ico", "destination": "/favicon.ico" },
+        { "source": "/admin/apple-touch-icon.png", "destination": "/apple-touch-icon.png" },
         { "source": "/admin", "destination": "/index.html" },
         { "source": "/admin/", "destination": "/index.html" },
         { "source": "/admin/:path*", "destination": "/index.html" }

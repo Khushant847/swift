@@ -59,3 +59,4 @@ coverage/
 .env.local
 .env*
 .last-deploy.txt
+.vercel

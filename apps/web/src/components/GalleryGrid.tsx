@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { Play, X } from 'lucide-react';
+import { ImageIcon, Play, X } from 'lucide-react';
 import type { GalleryItem } from '@/lib/types';
 import { cn, mediaUrl } from '@/lib/utils';
 import { SafeImage } from './SafeImage';
@@ -72,6 +72,11 @@ export function GalleryGrid({ items, tags, compact = false }: { items: GalleryIt
                   src={mediaUrl(item.mediaUrl)}
                   alt={item.caption || 'Swift Instruments gallery'}
                   className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  fallback={
+                    <span className="flex h-full w-full items-center justify-center bg-gradient-to-br from-brand-900 to-brand-700">
+                      <ImageIcon className="h-8 w-8 text-white/50" aria-hidden="true" />
+                    </span>
+                  }
                 />
               )}
               <span className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 to-transparent p-3">
